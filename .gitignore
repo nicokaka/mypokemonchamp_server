@@ -5,8 +5,8 @@ bin/
 *.dll
 *.so
 *.dylib
-server
-server-arm64
+/server
+/server-arm64
 
 # Dependências e caches
 vendor/
