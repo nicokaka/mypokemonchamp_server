@@ -1,0 +1,33 @@
+# Binários compilados
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+server-arm64
+
+# Dependências e caches
+vendor/
+.cache/
+.tmp/
+
+# Bancos de dados locais e runtime
+data/
+*.db
+*.db-journal
+*.db-wal
+*.log
+
+# Certificados e chaves privadas
+*.key
+*.pem
+*.pfx
+*.keystore
+
+# IDEs e Sistema Operacional
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
