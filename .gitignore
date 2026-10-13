@@ -20,7 +20,11 @@ data/
 *.db-wal
 *.log
 
-# Certificados e chaves privadas
+# Certificados, chaves privadas e builds de APK
+certs/
+build_apk/
+*.apk
+*.apkm
 *.key
 *.pem
 *.pfx
