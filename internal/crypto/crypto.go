@@ -134,8 +134,8 @@ func EncryptPmpAuth(pmpJSON, dummyValue string, serverUnixTime int64) (string, e
 	return base64.StdEncoding.EncodeToString(enc), nil
 }
 
-// DecryptPmcAuth decrypts an incoming Auth pmc payload, trying current time window and 0 (initial request before server time sync).
-func DecryptPmcAuth(pmcBase64, dummyValue string) (string, error) {
+// DecryptPmcAuth decrypts an incoming Auth pmc payload, trying current time window, client dummy timestamp window, and 0 (initial request before server time sync).
+func DecryptPmcAuth(pmcBase64 string, dummyValues ...string) (string, error) {
 	trimmed := strings.TrimSpace(pmcBase64)
 	if strings.HasPrefix(trimmed, "{") {
 		return trimmed, nil
@@ -146,18 +146,33 @@ func DecryptPmcAuth(pmcBase64, dummyValue string) (string, error) {
 	}
 	nowWin := uint32(uint64(time.Now().Unix()) / 600)
 	candidates := []uint32{nowWin, 0, nowWin - 1, nowWin + 1}
-	for _, win := range candidates {
-		key, iv, err := deriveAuthKeyIV(dummyValue, win)
-		if err != nil {
+	for _, dv := range dummyValues {
+		if ms, err := strconv.ParseInt(strings.TrimSpace(dv), 10, 64); err == nil && ms > 1000000000 {
+			sec := ms
+			if ms > 100000000000 {
+				sec = ms / 1000
+			}
+			w := uint32(uint64(sec) / 600)
+			candidates = append(candidates, w, w-1, w+1)
+		}
+	}
+	for _, dv := range dummyValues {
+		if dv == "" {
 			continue
 		}
-		dec, err := AesDecrypt(raw, key, iv)
-		if err != nil {
-			continue
-		}
-		unz, err := GZipDecode(dec)
-		if err == nil {
-			return string(unz), nil
+		for _, win := range candidates {
+			key, iv, err := deriveAuthKeyIV(dv, win)
+			if err != nil {
+				continue
+			}
+			dec, err := AesDecrypt(raw, key, iv)
+			if err != nil {
+				continue
+			}
+			unz, err := GZipDecode(dec)
+			if err == nil {
+				return string(unz), nil
+			}
 		}
 	}
 	return "", fmt.Errorf("failed to decrypt Auth pmc")

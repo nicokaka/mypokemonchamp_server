@@ -16,6 +16,7 @@ type ApiRequestEnvelope struct {
 	Jrom int             `json:"jrom,omitempty"`
 	Hsh  string          `json:"hsh,omitempty"`
 	Sid  string          `json:"sid,omitempty"`
+	Dmy  string          `json:"dmy,omitempty"`
 	Pmc  string          `json:"pmc,omitempty"`
 	AsNV string          `json:"asNV,omitempty"`
 	Pmp  json.RawMessage `json:"pmp,omitempty"`

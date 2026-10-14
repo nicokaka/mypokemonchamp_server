@@ -117,19 +117,22 @@ func (s *Server) decodeRequestPmp(r *http.Request) (model.ApiRequestEnvelope, ma
 		var dec string
 		var err error
 		if strings.HasPrefix(r.URL.Path, "/auth/") {
-			dec, err = crypto.DecryptPmcAuth(env.Pmc, dmy)
+			dec, err = crypto.DecryptPmcAuth(env.Pmc, dmy, env.Dmy)
 		} else {
 			sid := env.Sid
 			if sid == "" {
 				sid = st.SessionID
 			}
-			dec, err = crypto.DecryptPmcApi(env.Pmc, dmy, st.CsrfToken, sid, int(st.UdVer))
+			dec, err = crypto.DecryptPmcApi(env.Pmc, dmy, st.CsrfToken, sid, 1, int(st.UdVer))
+			if err != nil && env.Dmy != "" {
+				dec, err = crypto.DecryptPmcApi(env.Pmc, env.Dmy, st.CsrfToken, sid, 1, int(st.UdVer))
+			}
 		}
 		if err == nil && dec != "" {
 			log.Printf("  └─ [CRYPTO] Decrypted pmc (%d chars): %s", len(dec), truncate(dec, 180))
 			_ = json.Unmarshal([]byte(dec), &pmpMap)
 		} else {
-			log.Printf("  └─ [CRYPTO] pmc recebido (len=%d, dmy=%s) - usando modo híbrido", len(env.Pmc), dmy)
+			log.Printf("  └─ [CRYPTO] pmc recebido (len=%d, hdr_dmy=%s, env_dmy=%s) - usando modo híbrido", len(env.Pmc), dmy, env.Dmy)
 		}
 	}
 	return env, pmpMap
@@ -165,15 +168,17 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 		Pmp:  pmp,
 	}
 
-	// Optional pmc encryption if client explicitly forces encrypted response
-	if r.URL.Query().Get("encrypt") == "1" || r.Header.Get("X-PKB-FORCE-ENCRYPT") == "1" {
+	// Always populate resp.Pmc unless explicitly disabled (?encrypt=0).
+	// Disassembly of Net.ApiTemplate::ParseResponse (0x2dd2b58) proves that Unity's JsonUtility
+	// only deserializes ResponseBodyBase.pmc and then calls body.set_pmp(...) after decrypting pmc.
+	if r.URL.Query().Get("encrypt") != "0" {
 		if b, err := json.Marshal(pmp); err == nil {
 			st := s.Store.GetState()
 			var enc string
 			if strings.HasPrefix(r.URL.Path, "/auth/") {
 				enc, _ = crypto.EncryptPmpAuth(string(b), dmy, nowUnix)
 			} else {
-				enc, _ = crypto.EncryptPmpApi(string(b), dmy, st.CsrfToken, st.SessionID, int(st.UdVer))
+				enc, _ = crypto.EncryptPmpApi(string(b), dmy, st.CsrfToken, st.SessionID, 1)
 			}
 			if enc != "" {
 				w.Header().Set("X-PKB-ENCRYPT", "1")
@@ -206,6 +211,9 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 	switch path {
 	case "/auth/get-token":
 		uuid, _ := pmpReq["uuid"].(string)
+		if uuid == "" && len(env.Dmy) == 42 {
+			uuid = env.Dmy
+		}
 		if uuid != "" {
 			st = s.Store.UpdateAuth(uuid, "", st.CsrfToken, "")
 		}
@@ -228,6 +236,9 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 
 	case "/auth/register-user":
 		uuid, _ := pmpReq["uuid"].(string)
+		if uuid == "" && len(env.Dmy) == 42 {
+			uuid = env.Dmy
+		}
 		name, _ := pmpReq["name"].(string)
 		st = s.Store.UpdateAuth(uuid, name, st.CsrfToken, st.SessionID)
 		s.writeGameResponse(w, r, model.AuthRegisterUserPmp{
@@ -240,6 +251,9 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 
 	case "/auth/login":
 		uuid, _ := pmpReq["uuid"].(string)
+		if uuid == "" && len(env.Dmy) == 42 {
+			uuid = env.Dmy
+		}
 		st = s.Store.UpdateAuth(uuid, "", st.CsrfToken, st.SessionID)
 		zero := 0
 		s.writeGameResponse(w, r, model.AuthLoginPmp{

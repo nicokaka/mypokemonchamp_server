@@ -38,7 +38,24 @@ type PlayerState struct {
 	Bots         []model.MdBotMergeParam                   `json:"bots"`
 }
 
-const currentSchemaVer = 2
+const (
+	currentSchemaVer = 2
+	defaultUUID42    = "champ0001nicolas0001pokemonchampions000001"
+)
+
+func normalizeUUID42(u string) string {
+	if len(u) == 42 {
+		return u
+	}
+	if u == "" {
+		return defaultUUID42
+	}
+	if len(u) > 42 {
+		return u[:42]
+	}
+	pad := defaultUUID42
+	return (u + pad)[:42]
+}
 
 type Store struct {
 	mu       sync.RWMutex
@@ -56,6 +73,9 @@ func NewStore(dataDir string) (*Store, error) {
 		if err := json.Unmarshal(data, &s.state); err == nil &&
 			s.state.SchemaVer == currentSchemaVer &&
 			len(s.state.Pokemons) > 0 {
+			s.state.UUID = normalizeUUID42(s.state.UUID)
+			s.state.Profile.Id = s.state.UUID
+			s.state.UdVer = 1
 			if s.state.RankSingle == 0 {
 				s.state.RankSingle = 10
 				s.state.RatingSingle = 1500
@@ -69,6 +89,7 @@ func NewStore(dataDir string) (*Store, error) {
 			if s.state.SeasonPoints == 0 {
 				s.state.SeasonPoints = 1000
 			}
+			_ = s.Save()
 			return s, nil
 		}
 	}
@@ -95,9 +116,12 @@ func (s *Store) GetState() PlayerState {
 
 func (s *Store) UpdateAuth(uuid, name, csrfToken, sessionID string) PlayerState {
 	s.mu.Lock()
-	if uuid != "" {
+	if len(uuid) == 42 {
 		s.state.UUID = uuid
 		s.state.Profile.Id = uuid
+	} else if s.state.UUID == "" || len(s.state.UUID) != 42 {
+		s.state.UUID = normalizeUUID42(uuid)
+		s.state.Profile.Id = s.state.UUID
 	}
 	if name != "" {
 		s.state.Profile.Nam = name
@@ -108,6 +132,7 @@ func (s *Store) UpdateAuth(uuid, name, csrfToken, sessionID string) PlayerState 
 	if sessionID != "" {
 		s.state.SessionID = sessionID
 	}
+	s.state.UdVer = 1
 	s.state.Profile.Llog = time.Now().Unix()
 	st := s.state
 	s.mu.Unlock()
@@ -169,7 +194,7 @@ func (s *Store) BuildFullUD() *model.ApiUdParam {
 		Prfsumdt: map[string]interface{}{"all": map[string]interface{}{"dtlst": map[string]int{}}},
 		Usedhis:  map[string]interface{}{"all": map[string]interface{}{}},
 		Freebox:  map[string]interface{}{"all": []string{}},
-		UdVer:    s.state.UdVer,
+		UdVer:    1,
 	}
 }
 
@@ -904,7 +929,7 @@ func defaultPlayerState() PlayerState {
 	}
 
 	return PlayerState{
-		UUID:         "champ-uuid-nicolas-0001",
+		UUID:         defaultUUID42,
 		SupportID:    "SUP-CHAMP-9999",
 		DeviceCd:     "DVC-CHAMP-0001",
 		CsrfToken:    "tok_champ_private_0001",
@@ -928,7 +953,7 @@ func defaultPlayerState() PlayerState {
 			CreAt:  nowUnix,
 			Flng:   2,
 			Fri:    "1234-5678-9012",
-			Id:     "champ-uuid-nicolas-0001",
+			Id:     defaultUUID42,
 			Lavsp:  "1",
 			Lavsw:  "1",
 			Llday:  1,
