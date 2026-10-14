@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", envOrDefault("CHAMP_ADDR", ":9443"), "Endereço/porta de escuta HTTPS (ex: :9443)")
+	addr := flag.String("addr", envOrDefault("CHAMP_ADDR", ":7443"), "Endereço/porta de escuta HTTPS (ex: :7443)")
 	httpAddr := flag.String("http-addr", envOrDefault("CHAMP_HTTP_ADDR", ":9080"), "Endereço/porta de escuta HTTP auxiliar (ex: :9080)")
 	dataDir := flag.String("data-dir", envOrDefault("CHAMP_DATA_DIR", "data"), "Diretório de persistência JSON")
 	certDir := flag.String("cert-dir", envOrDefault("CHAMP_CERT_DIR", "certs"), "Diretório de certificados TLS/CA")

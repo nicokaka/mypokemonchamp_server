@@ -23,14 +23,14 @@ echo "=== 🏆 MyPokeChamp Studio — Painel de Controle Remoto (Oracle Cloud 24
 if [ -n "$KEY" ]; then
   if ! pgrep -f "$LOCAL_PORT:127.0.0.1:9080" > /dev/null; then
     echo "[*] Conectando túnel SSH seguro com o Oracle Cloud ($ORACLE_IP)..."
-    ssh -i "$KEY" -o StrictHostKeyChecking=no -f -N -L "$LOCAL_PORT:127.0.0.1:9080" "ubuntu@$ORACLE_IP"
+    ssh -i "$KEY" -o StrictHostKeyChecking=no -f -N -L "$LOCAL_PORT:127.0.0.1:9080" "ubuntu@$ORACLE_IP" </dev/null >/dev/null 2>&1
     sleep 1
   fi
   echo "[✓] Conexão segura estabelecida!"
-  echo "👉 Acesse no navegador (PC): http://localhost:$LOCAL_PORT/admin"
-  echo "👉 Ou direto via HTTPS (PC/Celular): https://$ORACLE_IP:9443/admin"
-  xdg-open "http://localhost:$LOCAL_PORT/admin" 2>/dev/null || true
+  echo "👉 Acesse no navegador (PC via Túnel SSH): http://localhost:$LOCAL_PORT/admin"
+  echo "👉 Ou direto via HTTPS/HTTP (PC/Celular): https://$ORACLE_IP:7443/admin | http://$ORACLE_IP:9080/admin"
+  xdg-open "http://localhost:$LOCAL_PORT/admin" </dev/null >/dev/null 2>&1 || true
 else
-  echo "👉 Acesse direto no navegador: https://$ORACLE_IP:9443/admin"
-  xdg-open "https://$ORACLE_IP:9443/admin" 2>/dev/null || true
+  echo "👉 Acesse direto no navegador: https://$ORACLE_IP:7443/admin"
+  xdg-open "https://$ORACLE_IP:7443/admin" </dev/null >/dev/null 2>&1 || true
 fi

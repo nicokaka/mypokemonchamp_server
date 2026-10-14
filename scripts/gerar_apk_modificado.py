@@ -82,7 +82,7 @@ def replace_in_zip(src_zip: Path, dst_zip: Path, replacements: dict[str, bytes])
 
 def main():
     parser = argparse.ArgumentParser(description="Gera os APKs modificados do Pokémon Champions para o Servidor Privado")
-    parser.add_argument("--url", default="https://164.152.40.114:9443", help="URL do Servidor Privado (máx 35 chars)")
+    parser.add_argument("--url", default="https://164.152.40.114:7443", help="URL do Servidor Privado (máx 35 chars)")
     parser.add_argument("--extracted-dir", default=str(DEFAULT_EXTRACTED_DIR), help="Pasta com base.apk e split_config.arm64_v8a.apk")
     parser.add_argument("--skip-so-patch", action="store_true", help="Não aplica patch em libil2cpp.so (usa AES-256-CBC nativo)")
     args = parser.parse_args()

@@ -22,13 +22,13 @@ fi
 
 chmod 755 "$INSTALL_DIR/bin/pokechamp-server"
 
-echo "[*] Liberando portas 9443 (HTTPS/WSS) e 9080 (Admin) no iptables da Oracle Cloud..."
+echo "[*] Liberando portas 7443 (HTTPS/WSS) e 9080 (Admin) no iptables da Oracle Cloud..."
 if iptables -L INPUT -n --line-numbers | grep -q "REJECT"; then
     REJECT_LINE=$(iptables -L INPUT -n --line-numbers | grep "REJECT" | head -n1 | awk '{print $1}')
-    iptables -C INPUT -p tcp --dport 9443 -j ACCEPT 2>/dev/null || iptables -I INPUT "$REJECT_LINE" -p tcp --dport 9443 -j ACCEPT
+    iptables -C INPUT -p tcp --dport 7443 -j ACCEPT 2>/dev/null || iptables -I INPUT "$REJECT_LINE" -p tcp --dport 7443 -j ACCEPT
     iptables -C INPUT -p tcp --dport 9080 -j ACCEPT 2>/dev/null || iptables -I INPUT "$REJECT_LINE" -p tcp --dport 9080 -j ACCEPT
 else
-    iptables -C INPUT -p tcp --dport 9443 -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport 9443 -j ACCEPT
+    iptables -C INPUT -p tcp --dport 7443 -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport 7443 -j ACCEPT
     iptables -C INPUT -p tcp --dport 9080 -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp --dport 9080 -j ACCEPT
 fi
 
@@ -47,7 +47,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/pokechamp-server
-ExecStart=/opt/pokechamp-server/bin/pokechamp-server -addr :9443 -http-addr :9080 -public-host 164.152.40.114
+ExecStart=/opt/pokechamp-server/bin/pokechamp-server -addr :7443 -http-addr :9080 -public-host 164.152.40.114
 Restart=always
 RestartSec=3
 LimitNOFILE=65536
@@ -62,8 +62,8 @@ systemctl restart pokechamp.service
 
 echo ""
 echo "======================================================================"
-echo "[SUCESSO] Servidor Pokémon Champions rodando na porta 9443 (HTTPS/WSS)!"
+echo "[SUCESSO] Servidor Pokémon Champions rodando na porta 7443 (HTTPS/WSS)!"
 echo "Status: systemctl status pokechamp"
 echo "Logs  : journalctl -u pokechamp -f"
-echo "Admin : http://164.152.40.114:9080/admin"
+echo "Admin : https://164.152.40.114:7443/admin (ou http://164.152.40.114:9080/admin)"
 echo "======================================================================"
