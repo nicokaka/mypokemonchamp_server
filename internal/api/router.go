@@ -36,6 +36,28 @@ func NewServer(s *store.Store, publicURL, wsURL string) *Server {
 	}
 }
 
+func (s *Server) resolvePublicURL(r *http.Request) string {
+	if r != nil && r.Host != "" {
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		return scheme + "://" + r.Host
+	}
+	return s.PublicURL
+}
+
+func (s *Server) resolveWSURL(r *http.Request) string {
+	if r != nil && r.Host != "" {
+		scheme := "ws"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "wss"
+		}
+		return scheme + "://" + r.Host + "/ws"
+	}
+	return s.WSURL
+}
+
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/admin", s.handleAdminUI)
@@ -168,6 +190,10 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 		s.handleAdminUI(w, r)
 		return
 	}
+	if r.Method != http.MethodPost && !strings.HasPrefix(r.URL.Path, "/auth/") && !strings.HasPrefix(r.URL.Path, "/api/") {
+		http.NotFound(w, r)
+		return
+	}
 	start := time.Now()
 	path := r.URL.Path
 	log.Printf("[API] %s %s from %s (DMY=%s, ENC=%s)",
@@ -183,13 +209,14 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 		if uuid != "" {
 			st = s.Store.UpdateAuth(uuid, "", st.CsrfToken, "")
 		}
+		pubURL := s.resolvePublicURL(r)
 		s.writeGameResponse(w, r, model.AuthGetTokenPmp{
 			Token: st.CsrfToken,
 			Exp:   now + 86400,
 			EnvLs: []model.AuthEnv{
-				{Name: "Production", Url: s.PublicURL},
-				{Name: "Stg", Url: s.PublicURL},
-				{Name: "Req", Url: s.PublicURL},
+				{Name: "Production", Url: pubURL},
+				{Name: "Stg", Url: pubURL},
+				{Name: "Req", Url: pubURL},
 			},
 		})
 
@@ -503,7 +530,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			Exp:    int(now + 3600),
 			Atk:    "atk_bot_match_001",
 			Ehsh:   "ehsh_bot_match_001",
-			Ws:     s.WSURL,
+			Ws:     s.resolveWSURL(r),
 			Type:   "match",
 			Bamin:  900,
 			Lmst:   now,
@@ -521,7 +548,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			Exp:    &exp,
 			Atk:    "atk_bot_match_001",
 			Ehsh:   "ehsh_bot_match_001",
-			Ws:     s.WSURL,
+			Ws:     s.resolveWSURL(r),
 			Type:   "battle",
 			UD:     s.Store.BuildFullUD(),
 		})
@@ -545,7 +572,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			"exp":    int64(now + 3600),
 			"atk":    "atk_bot_match_001",
 			"ehsh":   "ehsh_bot_match_001",
-			"ws":     s.WSURL,
+			"ws":     s.resolveWSURL(r),
 			"type":   "battle",
 			"bamin":  900,
 			"rank":   1,
@@ -593,7 +620,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			"atk":  "atk_lobby_001",
 			"ehsh": "ehsh_lobby_001",
 			"rmid": "rm_lobby_001",
-			"ws":   s.WSURL,
+			"ws":   s.resolveWSURL(r),
 			"type": "lobby",
 			"UD":   s.Store.BuildFullUD(),
 		})
@@ -603,7 +630,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			"exp":   int(now + 3600),
 			"atk":   "atk_lobby_001",
 			"ehsh":  "ehsh_lobby_001",
-			"ws":    s.WSURL,
+			"ws":    s.resolveWSURL(r),
 			"type":  "lobby",
 			"rul":   byte(1),
 			"regid": "reg_standard_01",

@@ -23,20 +23,18 @@ OUT_DIR = ROOT_DIR / "build_apk"
 
 def patch_classes_dex(dex_bytes: bytes) -> bytes:
     buf = bytearray(dex_bytes)
-    # Bypass Google Play Pairip LicenseClient in classes.dex:
-    # 1. 0x445394: LicenseClient.checkLicense(Context)V -> return-void (0e 00)
-    # 2. 0x445704: LicenseClient.initializeLicenseCheck()V -> return-void (0e 00)
-    # 3. 0x444f1c: LicenseClient.isLocalCheckPassed()Z -> const/4 v0, 1; return v0 (12 10 0f 00)
-    buf[0x445394:0x445396] = b"\x0e\x00"
-    buf[0x445704:0x445706] = b"\x0e\x00"
-    buf[0x444F1C:0x444F20] = b"\x12\x10\x0f\x00"
+    # Bypass Google Play Pairip LicenseClient in classes.dex by NOPing the two 6-byte invoke-static calls:
+    # 1. 0x4442c8..0x4442ce: Application.attachBaseContext -> invoke-static {v1}, LicenseClient.checkLicense(Context)V (7110 9df0 0100)
+    # 2. 0x4460d8..0x4460de: LicenseContentProvider.onCreate -> invoke-static {v0}, LicenseClient.checkLicense(Context)V (7110 9df0 0000)
+    buf[0x4442C8:0x4442CE] = b"\x00\x00\x00\x00\x00\x00"
+    buf[0x4460D8:0x4460DE] = b"\x00\x00\x00\x00\x00\x00"
 
     # Recompute DEX SHA-1 signature (bytes 12..32 over bytes 32..EOF)
     buf[12:32] = hashlib.sha1(buf[32:]).digest()
     # Recompute DEX Adler32 checksum (bytes 8..12 over bytes 12..EOF)
     checksum = zlib.adler32(buf[12:]) & 0xFFFFFFFF
     struct.pack_into("<I", buf, 8, checksum)
-    print(f"  [OK] classes.dex: Bypass LicenseClient aplicado (Adler32=0x{checksum:08x})")
+    print(f"  [OK] classes.dex: Bypass LicenseClient (NOP invoke-static) aplicado (Adler32=0x{checksum:08x})")
     return bytes(buf)
 
 
@@ -69,6 +67,9 @@ def patch_global_metadata(md_bytes: bytes, target_url: str) -> bytes:
     # 2. Regex de validação de endpoint em Net.NetEnvironment::SetApiEndpoint
     replace_literal(10175, "^https?://.*$")
     replace_literal(10176, "^https?://.*$")
+    # 3. Se o endpoint usar http://, trocar prefixo WebSocket2 (StringLiteral[16619]) de wss:// para ws://
+    if target_url.startswith("http://"):
+        replace_literal(16619, "ws://")
 
     return bytes(buf)
 
@@ -103,7 +104,7 @@ def replace_in_zip(src_zip: Path, dst_zip: Path, replacements: dict[str, bytes])
 
 def main():
     parser = argparse.ArgumentParser(description="Gera os APKs modificados do Pokémon Champions para o Servidor Privado")
-    parser.add_argument("--url", default="https://164.152.40.114:7443", help="URL do Servidor Privado (máx 35 chars)")
+    parser.add_argument("--url", default="http://164.152.40.114:443", help="URL do Servidor Privado (máx 35 chars)")
     parser.add_argument("--extracted-dir", default=str(DEFAULT_EXTRACTED_DIR), help="Pasta com base.apk e split_config.arm64_v8a.apk")
     parser.add_argument("--skip-so-patch", action="store_true", help="Não aplica patch em libil2cpp.so (usa AES-256-CBC nativo)")
     args = parser.parse_args()

@@ -59,11 +59,24 @@ SERVICE_EOF
 systemctl daemon-reload
 systemctl enable pokechamp.service
 systemctl restart pokechamp.service
+sleep 1
+
+echo "[*] Configurando Smart Multiplexer na porta 443 (PTCGP 8443 + PokeChamp 7443)..."
+iptables -t nat -C PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 7443 2>/dev/null || \
+    iptables -t nat -I PREROUTING 1 -p tcp --dport 443 -j REDIRECT --to-port 7443
+iptables -t nat -D PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 8443 2>/dev/null || true
+
+if which netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save 2>/dev/null || true
+elif which iptables-save >/dev/null 2>&1; then
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+fi
 
 echo ""
 echo "======================================================================"
-echo "[SUCESSO] Servidor Pokémon Champions rodando na porta 7443 (HTTPS/WSS)!"
+echo "[SUCESSO] Servidor Pokémon Champions rodando na porta 443 -> 7443!"
 echo "Status: systemctl status pokechamp"
 echo "Logs  : journalctl -u pokechamp -f"
-echo "Admin : https://164.152.40.114:7443/admin (ou http://164.152.40.114:9080/admin)"
+echo "Admin : https://164.152.40.114/admin (ou http://164.152.40.114:443/admin)"
 echo "======================================================================"

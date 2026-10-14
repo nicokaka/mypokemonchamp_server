@@ -55,18 +55,25 @@ sign_one "$DIR/build_apk/base.patched.apk" "base.apk"
 sign_one "$DIR/build_apk/split_config.arm64_v8a.patched.apk" "split_config.arm64_v8a.apk"
 sign_one "$DIR/apk/extracted/split_UnityDataAssetPack.apk" "split_UnityDataAssetPack.apk"
 
-echo "[4/4] Instalando Pokémon Champions no celular ($MODEL)..."
-adb -s "$SERIAL" install-multiple -r -i com.android.vending --user 0 --no-incremental \
+echo "[4/4] Instalando Pokémon Champions Modificado no celular ($MODEL)..."
+if ! adb -s "$SERIAL" install-multiple -r -i com.android.vending --user 0 --no-incremental \
     "$DIR/build_apk/signed_base.apk" \
     "$DIR/build_apk/signed_split_config.arm64_v8a.apk" \
-    "$DIR/build_apk/signed_split_UnityDataAssetPack.apk"
+    "$DIR/build_apk/signed_split_UnityDataAssetPack.apk" 2>/dev/null; then
+    echo "  -> Removendo assinatura anterior para instalar versão modificada..."
+    adb -s "$SERIAL" uninstall jp.pokemon.pokemonchampions >/dev/null 2>&1 || true
+    adb -s "$SERIAL" install-multiple -r -i com.android.vending --user 0 --no-incremental \
+        "$DIR/build_apk/signed_base.apk" \
+        "$DIR/build_apk/signed_split_config.arm64_v8a.apk" \
+        "$DIR/build_apk/signed_split_UnityDataAssetPack.apk"
+fi
 
 echo "[*] Iniciando Pokémon Champions no aparelho..."
 adb -s "$SERIAL" shell am start --user 0 -n jp.pokemon.pokemonchampions/com.unity3d.player.UnityPlayerActivity >/dev/null 2>&1 || true
 
 echo ""
 echo "========================================================================="
-echo "[SUCESSO] Pokémon Champions instalado no seu celular ($MODEL)!"
-echo "Servidor Privado: https://164.152.40.114:7443"
-echo "Painel de Perfil: http://localhost:19080/admin (ou http://164.152.40.114:9080/admin)"
+echo "[SUCESSO] Pokémon Champions (Modificado) instalado no seu celular ($MODEL)!"
+echo "Servidor Privado: http://164.152.40.114:443 (Smart Multiplexer na porta 443)"
+echo "Painel de Perfil: http://164.152.40.114:443/admin (ou http://localhost:19080/admin)"
 echo "========================================================================="
