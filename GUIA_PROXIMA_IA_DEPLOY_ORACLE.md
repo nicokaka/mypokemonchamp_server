@@ -1,136 +1,94 @@
-# 🤖 Guia de Handoff para a Próxima IA — Deploy Oracle Cloud & APK Pokémon Champions
+# 🤖 Guia Técnico & Handoff de Engenharia Reversa — Pokémon Champions (`v1.2.2 Build 3859`)
 
-> **Destinatário:** Próximo agente de IA (ou desenvolvedor) executando no computador principal do usuário que possui a chave SSH da Oracle Cloud (`ssh-key-2026-09-19.key`).
-> **Status Atual:** Servidor 100% codificado em Go, testado (`go test ./...` PASS), binários Linux (`arm64` e `amd64`) pré-compilados em `DEPLOY_SERVIDOR/` e scripts de automação prontos.
-
----
-
-## 1. Contexto Geral e Decisão de Arquitetura
-
-1. **Escopo Definido pelo Usuário:**
-   - Construção de um **Servidor 100% Privado (`mypokechamp_server`)** para **Pokémon Champions (`jp.pokemon.pokemonchampions` v1.2.2 Build 3859)**.
-   - Integração com Pokémon HOME oficial e matchmaking online oficial foram descartados por serem validados server-to-server nos servidores da Nintendo/ILCA. Todo o ecossistema (Box, Times, Treinamento com VP infinito, Matchmaking e Batalhas contra Bots via WebSocket) roda **100% dentro deste servidor privado**.
-2. **Coexistência na Mesma VM Oracle Cloud (`164.152.40.114`):**
-   - A VM Oracle Cloud Free Tier do usuário (`ubuntu@164.152.40.114`) **já roda o servidor privado de Pokémon TCG Pocket (`ptcgp.service` em `/opt/ptcgp-server`)** ocupando as portas `443 -> 8443` e `8081`.
-   - **REGRA DE OURO PARA A PRÓXIMA IA:** **NUNCA** pare, altere ou sobrescreva `/opt/ptcgp-server`, o serviço `ptcgp.service` ou o redirecionamento `iptables` da porta `443 -> 8443`.
-   - O **MyPokeChampServer (`pokechamp.service`)** foi projetado para rodar isoladamente em **`/opt/pokechamp-server`** usando:
-     - **Porta `9443` (TCP):** Servidor Principal HTTPS (com geração dinâmica de certificados TLS por SNI) + WebSocket (`wss://164.152.40.114:9443/ws`) para Matchmaking e Batalhas contra Bots.
-     - **Porta `9080` (TCP):** Listener HTTP auxiliar e Painel Web Admin (`http://164.152.40.114:9080/admin`).
+> **Status Atual (Outubro/2026):**
+> - **Servidor Oracle Cloud (`164.152.40.114`):** Ativo e rodando em produção via `pokechamp.service` (`/opt/pokechamp-server/bin/pokechamp-server`), compartilhando a porta pública `443` com o servidor do Pokémon TCG Pocket (`ptcgp.service` em `127.0.0.1:8443`) através do **Smart TCP/TLS/HTTP Multiplexer** na porta `7443`.
+> - **MyPokeChamp Studio (`/admin`):** Painel web completo disponível para edição de Perfil, Victory Points (VP), Box Pokémon (IVs/EVs/Moves/Nature/Ability/Tera/Shiny), Times e Bots.
+> - **APK Modificado (`build_apk/*-aligned-debugSigned.apk`):** Com bypass de licença Google Play (`LicenseClient`), liberação de HTTP cleartext no `libunity.so` e redirecionamento para `http://164.152.40.114:443`.
 
 ---
 
-## 2. Descobertas da Engenharia Reversa (`v1.2.2 Build 3859`)
+## 1. Arquitetura na Oracle Cloud (`164.152.40.114`) e Coexistência com PTCGP
 
-Caso precise ajustar qualquer detalhe do protocolo ou do patcher do APK, aqui estão os mapeamentos exatos extraídos de `global-metadata.dat` (IL2CPP v31, magic `0xFAB11BAF`) e `libil2cpp.so` (ARM64):
+A instância ARM64 (`aarch64`) da Oracle Cloud (`ubuntu@164.152.40.114`, chave SSH `/home/nicokaka/Documents/projects/tcg-makemoney/ssh-key-2026-09-19.key`) hospeda dois servidores privados simultaneamente na porta `443`:
 
-### 2.1. Mapeamento ELF de `libil2cpp.so` (`va_to_off`)
-- `PT_LOAD [1]`: `vaddr = 0x0 .. 0x1ed94b8` $\rightarrow$ `file_offset = va`
-- `PT_LOAD [2]`: `vaddr = 0x1edd4c0 .. 0x5096b20` $\rightarrow$ `file_offset = va - 0x4000`
-- `PT_LOAD [3]`: `vaddr = 0x509ab20 .. 0x53ca588` $\rightarrow$ `file_offset = va - 0x8000`
-- `PT_LOAD [4]`: `vaddr = 0x53ce588 .. 0x56be808` $\rightarrow$ `file_offset = va - 0xc000`
+1. **Regra `iptables` (`PREROUTING`):**
+   - Todo tráfego TCP externo chegando na porta `443` é redirecionado para a porta `7443` (`pokechamp-server`).
+2. **Smart Multiplexer (`cmd/server/main.go` na porta `:7443`):**
+   - Inspeciona os primeiros bytes de cada conexão TCP (`peekConn`):
+     - **HTTP em texto puro (`GET`, `POST`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`):** Atendido diretamente pelo `pokechamp-server` (usado pelo APK modificado do Pokémon Champions em `http://164.152.40.114:443` e pelo painel `/admin`).
+     - **TLS `ClientHello` (`0x16`):** Extrai o **SNI** sem consumir o stream:
+       - Se o SNI pertencer ao **Pokémon Champions** (`*pokemonchampions*`), termina o TLS localmente com certificado dinâmico (`internal/localtls`).
+       - Caso contrário (tráfego do **Pokémon TCG Pocket** ou SNI de `ptcgp`), faz proxy transparente TCP bruto para `127.0.0.1:8443` (`ptcgp.service`).
+3. **Comandos Rápidos de Manutenção na Oracle Cloud:**
+   ```bash
+   # Ver logs em tempo real do Pokémon Champions
+   ssh -i /home/nicokaka/Documents/projects/tcg-makemoney/ssh-key-2026-09-19.key ubuntu@164.152.40.114 "sudo journalctl -u pokechamp -f"
 
-### 2.2. Endereços Virtuais (VAs) Críticos em `libil2cpp.so` (`Net.dll`)
-- `Net.ApiBase::CreateRequestBodyBase`: `0x451d120`
-  - `0x451d1e0`: `BL 0x4537950` (`Net.Encrypt::EncryptRequestPmpAuth`)
-  - `0x451d23c`: `BL 0x45386c0` (`Net.Encrypt::EncryptRequestPmpApi`)
-- `Net.ApiBase::CreateHeader`: `0x451d41c` (Injeta `X-PKB-ENCRYPT`, `X-PKB-HASH-CHECK`, `X-PKB-DMY-VAL`)
-- `Net.ApiBase::<Response>d__39::MoveNext`: `0x45200dc` (Lê `X-PKB-S-TIME`, `X-PKB-ENCRYPT`, `X-PKB-DMY-VAL`)
-- `Net.ApiBase::CheckResponseBodyBase`: `0x451d9d8`
-- `Net.ApiRegisteredTemplate::CreateRequestBody`: `0x2dd2890`
-- `Net.ApiRegisteredTemplate::DeserializeResponseBody`: `0x2dd2b58`
-  - **Fast-path nativo em `0x2dd2c38`:** O cliente desserializa o JSON completo (`TResponseBody`) em `0x2dd2c24` e verifica `String.IsNullOrEmpty(response.pmc)` em `0x2dd2c38`. Se `pmc` estiver vazio/omitido e `pmp` estiver presente no JSON (`{"code": 0, "pmp": {...}}`), o cliente usa `response.pmp` diretamente e retorna `ApiErrorType.None (0)` sem exigir descriptografia!
-- `Net.Encrypt::EncryptRequestPmpAuth`: `0x4537950`
-- `Net.Encrypt::EncryptRequestPmpApi`: `0x45386c0`
-- `Net.Encrypt::DecryptResponsePmcAuth`: `0x4538b48`
-- `Net.Encrypt::DecryptResponsePmcApi`: `0x4539900`
-- `Net.NetEnvironment::SetApiEndpoint`: `0x453aff4`
-- `Net.NetEnvironment::GetApiEndPoint`: `0x453b3f4`
-- `Net.NetEnvironment::.cctor`: `0x453b528`
-
-### 2.3. Algoritmo de Criptografia `pmc` Implementado (`internal/crypto/crypto.go`)
-- **Compressão + Cifra:** `GZip` seguido de `AES-256-CBC` com padding `PKCS7` e codificado em `Base64`.
-- **Derivação de Chave/IV para `/auth/*` (`EncryptPmpAuth` / `DecryptPmcAuth`):**
-  - `win = uint32(serverNowUnixtime / 600)` (no primeiro request antes de receber `X-PKB-S-TIME`, o cliente pode usar `win = 0`; nosso servidor testa `nowWin`, `0`, `nowWin-1` e `nowWin+1` automaticamente).
-  - `md5Dummy = MD5Hex(dummyValue)` (onde `dummyValue` vem do header HTTP `X-PKB-DMY-VAL`).
-  - `h2 = MD5Hex(fmt.Sprintf("%d$%s", win, md5Dummy))`
-  - `combined = md5Dummy + h2` (64 caracteres hex)
-  - `shift = int(win & 31)`
-  - `key = HexDecode(combined[shift:] + combined[:shift])` (32 bytes = 256 bits)
-  - `iv = HexDecode(MD5Hex(fmt.Sprintf("%s;%d", dummyValue, win)))` (16 bytes = 128 bits)
-- **Derivação de Chave/IV para `/api/*` (`EncryptPmpApi` / `DecryptPmcApi`):**
-  - `h1 = MD5Hex(fmt.Sprintf("%s$%s$%s", sessionId, csrfToken, dummyValue))`
-  - `shift = int(ParseInt64(dummyValue) & 31)`
-  - `rotated = h1[shift:] + h1[:shift]`
-  - `h2 = MD5Hex(fmt.Sprintf("%d%s", udVer, rotated))`
-  - `key = HexDecode(h1 + h2)` (32 bytes = 256 bits)
-  - `iv = HexDecode(MD5Hex(fmt.Sprintf("%s=%s=%s", sessionId, dummyValue, csrfToken)))` (16 bytes = 128 bits)
-
-### 2.4. Strings Críticas em `global-metadata.dat`
-- `StringLiteral[13153]`: `'https://api.app.pokemonchampions.jp'` (35 bytes) — Endpoint inicial do jogo.
-- `StringLiteral[10175]`: `'^https://([0-9A-Za-z\\-]+)?api(\\.[0-9A-Za-z\\-]+)?\\.app\\.pokemonchampions\\.jp/?$'` (78 bytes) — Regex que valida as URLs recebidas em `envLs` no `/auth/get-token`.
-- `StringLiteral[10176]`: `'^https://([0-9A-Za-z]+)\\-api'` (28 bytes) — Segundo Regex de ambiente em `SetApiEndpoint`.
+   # Compilar localmente para ARM64 e atualizar o binário na Oracle Cloud
+   CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o pokechamp-server-arm64 ./cmd/server
+   scp -i /home/nicokaka/Documents/projects/tcg-makemoney/ssh-key-2026-09-19.key pokechamp-server-arm64 ubuntu@164.152.40.114:/tmp/pokechamp-server.new
+   ssh -i /home/nicokaka/Documents/projects/tcg-makemoney/ssh-key-2026-09-19.key ubuntu@164.152.40.114 "sudo systemctl stop pokechamp && sudo mv /tmp/pokechamp-server.new /opt/pokechamp-server/bin/pokechamp-server && sudo chmod +x /opt/pokechamp-server/bin/pokechamp-server && sudo systemctl start pokechamp"
+   ```
 
 ---
 
-## 3. Arquitetura do Repositório
+## 2. Achados Críticos da Engenharia Reversa (`libil2cpp.so` & `global-metadata.dat`)
 
-| Arquivo | Função |
-| :--- | :--- |
-| [`cmd/server/main.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/cmd/server/main.go) | Entrypoint do servidor; inicia HTTPS com SNI dinâmico (`:9443`) e HTTP auxiliar (`:9080`). |
-| [`internal/crypto/crypto.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/crypto/crypto.go) | Criptografia/descriptografia real `AES-256-CBC` + `GZip` + `MD5` para `/auth/*` e `/api/*`. |
-| [`internal/localtls/localtls.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/localtls/localtls.go) | Geração automática de CA raiz e certificados TLS folha dinâmicos por SNI (`api.app.pokemonchampions.jp`, `164.152.40.114`). |
-| [`internal/model/dto.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/model/dto.go) | Structs canônicos do `Net.dll` (`ApiRequestEnvelope`, `ApiResponseEnvelope`, `ApiUdParam`, `ApiUserPokemonParam`, etc.). |
-| [`internal/store/store.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/store/store.go) | Persistência em `data/player_state.json` com 999.999 VP, 12 Pokémon competitivos Shiny/Mega Lv.50, 2 times e 5 Bots Campeões. |
-| [`internal/api/router.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/api/router.go) | Handlers de todas as rotas `/auth/*`, `/api/*`, `/health` e Painel Web Admin (`/admin`). |
-| [`internal/ws/battle_ws.go`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/internal/ws/battle_ws.go) | Servidor WebSocket RFC 6455 nativo compatível com `WebSocket2` para Matchmaking e Batalhas contra Bots. |
-| [`scripts/deploy_champ_oracle.py`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/scripts/deploy_champ_oracle.py) | Compila os binários Linux e faz o deploy completo via SSH/SCP para `ubuntu@164.152.40.114`. |
-| [`DEPLOY_SERVIDOR/instalar_champ_oracle.sh`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/DEPLOY_SERVIDOR/instalar_champ_oracle.sh) | Script executado na VM Oracle Cloud: cria `/opt/pokechamp-server`, abre portas `9443` e `9080` no `iptables` e ativa `pokechamp.service`. |
-| [`scripts/gerar_apk_modificado.py`](file:///c:/Users/nicolas/.gemini/antigravity-ide/scratch/mypokechamp_server/scripts/gerar_apk_modificado.py) | Aplica patch em `global-metadata.dat` (e opcionalmente em `libil2cpp.so`) dentro do APK do Pokémon Champions. |
+### 2.1. Por que `resp.Pmc` DEVE SEMPRE ser populado (`Net.ApiTemplate::ParseResponse` — `VA 0x2dd2b58`)
+A descompilação de `Net.ApiTemplate<TReq, TReqPmp, TRes, TResPmp>::ParseResponse` (`0x2dd2b58..0x2dd2e58` em `libil2cpp.so`) revelou como a Unity desserializa respostas:
+1. Em `0x2dd2c24`, o cliente chama `JsonUtility.FromJson<TRes>(responseText)`. Como `pmp` no wrapper genérico `ResponseBodyBase<TResPmp>` é acessado via propriedades virtuais (`vtable #0x178 get_pmp` / `vtable #0x188 set_pmp`), o `JsonUtility` da Unity **ignora o campo `"pmp"` do JSON externo** e desserializa apenas os campos concretos da classe base `ResponseBodyBase` (como `code`, `pmc`, `tmV`, `ppV`, `wvV`, `sexp`, `inH`).
+2. Em `0x2dd2c30..0x2dd2c3c`, o código verifica `string.IsNullOrEmpty(body.pmc)`.
+3. **Armadilha:** Se `body.pmc` estiver vazio (`""`), o código salta para `0x2dd2d68` e retorna `(0, body)` **sem nunca chamar `body.set_pmp(...)`**, deixando `body.get_pmp() == null`!
+4. Logo em seguida, em `AuthGetToken::CheckResponseBody` (`VA 0x4525950`, instrução `0x45259cc`), o cliente chama `body.get_pmp()`, vê `null` (`cbz x0, 0x4525a2c`) e retorna o código de erro `0x493ed` (`299997`), fazendo o jogo repetir `/auth/get-token` em loop infinito na tela de título!
+5. **Solução implementada em [`internal/api/router.go`](internal/api/router.go):**
+   - `writeGameResponse` **sempre** criptografa o `pmp` em `resp.Pmc` (e envia `X-PKB-ENCRYPT: 1`), usando `crypto.EncryptPmpAuth` para `/auth/*` e `crypto.EncryptPmpApi` para `/api/*`.
+   - Quando `body.pmc` está presente, `ParseResponse` (`0x2dd2ce0..0x2dd2e54`) descriptografa `body.pmc`, converte `:[]` em `:null`, executa `JsonUtility.FromJson<TResPmp>(pmpJson)` e chama `body.set_pmp(pmp)` (`0x2dd2e4c`).
+
+### 2.2. Sincronia de Tempo e `dmy` em `DecryptResponsePmpAuth` (`VA 0x4538b48`)
+1. Em `CheckResponseAsync` (`VA 0x45200dc`), o cliente lê primeiro os headers HTTP da resposta:
+   - `X-PKB-DMY-VAL` (`0x45202d8`) $\rightarrow$ passado como `dmyVal` para `ParseResponse`.
+   - `X-PKB-S-TIME` (`0x452035c`) $\rightarrow$ chama `SetServerTime(sTime)` (`VA 0x454deec`) **antes** de chamar `ParseResponse` (`0x45203fc`).
+2. Assim, quando `DecryptResponsePmpAuth(body.pmc, dmyVal)` (`VA 0x4538b48`) roda no cliente, `GetServerTime()` já contém exatamente o `nowUnix` enviado pelo servidor em `X-PKB-S-TIME`!
+3. Na recepção de requisições do cliente (`decodeRequestPmp`), `AuthGetToken::CreateRequestBody` (`VA 0x4525628`) gera uma string alfanumérica de 42 caracteres no campo `dmy` do JSON (`env.Dmy`) e um timestamp em milissegundos no header `X-PKB-DMY-VAL`. Nossa função `crypto.DecryptPmcAuth` em [`internal/crypto/crypto.go`](internal/crypto/crypto.go) testa ambos (`dmy` do header e `env.Dmy` do JSON) e também calcula a janela `win = uint32((ms/1000)/600)` a partir do próprio `X-PKB-DMY-VAL` do cliente.
+
+### 2.3. Sincronia de `UdVer = 1` em `DecryptResponsePmpApi` (`VA 0x4539900`)
+1. Em `DecryptResponsePmpApi` (`VA 0x4539900`), o cliente tenta descriptografar `body.pmc` das rotas `/api/*` iterando sobre `offsets = {1, 0}` (`0x45399b4`), ou seja, testando `candidateUdVer = clientUdVer + 1` e `clientUdVer + 0`.
+2. Antes de carregar o `UD` pela primeira vez, `clientUdVer == 0`. Depois que o `UD` é carregado, `clientUdVer == UD.udVer`.
+3. Mantendo `UdVer = 1` fixo em `BuildFullUD()` ([`internal/store/store.go`](internal/store/store.go)) e em `EncryptPmpApi(..., 1)` ([`internal/api/router.go`](internal/api/router.go)), o valor `1` bate **tanto** quando `clientUdVer == 0` (`0 + 1 = 1`) **quanto** quando `clientUdVer == 1` (`1 + 0 = 1`), eliminando qualquer risco de dessincronização mesmo após edições no painel `/admin`.
+
+### 2.4. Exigência de `UUID` com Exatamente 42 Caracteres (`AuthRegisterUser::CheckResponseBody` — `VA 0x4525b3c`)
+1. Em `AuthRegisterUser::CheckResponseBody` (`0x4525c10..0x4525c18`), o cliente executa `cmp w8, #0x2a` (`42`) sobre `pmp.uuid.Length`.
+2. Se `len(uuid) != 42`, o cliente rejeita a resposta com erro `0x493eb` (`299995`).
+3. Em [`internal/store/store.go`](internal/store/store.go), `normalizeUUID42` garante que `s.state.UUID` e `s.state.Profile.Id` tenham sempre 42 caracteres (`"champ0001nicolas0001pokemonchampions000001"` por padrão, ou o UUID de 42 caracteres enviado pelo próprio cliente).
+
+### 2.5. Campos Omitidos no Topo do `ApiResponseEnvelope` (`ApiBase::CheckResponseBodyBase` — `VA 0x451d9d8`)
+Em `writeGameResponse` ([`internal/api/router.go`](internal/api/router.go)):
+- `Asset` e `Md` no envelope externo devem permanecer `nil` (omitidos) para que `CheckResponseBodyBase` (`0x451d9d8`) **não sobrescreva** os domínios oficiais da CDN da Nintendo/ILCA para download de AssetBundles e MasterData.
+- `Sid` no envelope externo deve permanecer vazio (o `sid` real vai dentro de `AuthLoginPmp` em `pmp`/`pmc`), evitando que `CheckResponseBodyBase` invoque `DecryptResponseSessionIdApi` (`VA 0x4539f40`) em cada resposta.
 
 ---
 
-## 4. Passo a Passo para a Próxima IA (Deploy na Oracle Cloud)
+## 3. Patches Aplicados no APK (`scripts/gerar_apk_modificado.py`)
 
-Quando o usuário abrir este projeto no computador que contém a chave SSH (`ssh-key-2026-09-19.key`), siga exatamente estes passos:
+O gerador [`scripts/gerar_apk_modificado.py`](scripts/gerar_apk_modificado.py) aplica 4 camadas de patch para produzir os splits em `build_apk/`:
 
-### Passo 1: Executar o Deploy Automatizado via SSH
-Localize o arquivo `.key` (geralmente em `~/.ssh/ssh-key-2026-09-19.key`, `Downloads` ou na pasta do `mytcgserver`) e execute:
+1. **Bypass da Verificação de Licença da Google Play (`base.apk` $\rightarrow$ `classes.dex`):**
+   - O APK original verifica a assinatura/licença da Google Play em `com.google.android.vending.licensing.LicenseClient::checkLicense`. Quando re-assinado com chave debug, o método original trava o jogo em uma tela preta logo na abertura.
+   - O script substitui o bytecode Dalvik de `checkLicense` por `return-void` (`0e 00`) e recalcula os headers SHA-1 e Adler32 do `classes.dex`.
+2. **Reconstrução da Tabela de Strings do `global-metadata.dat` (`base.apk`):**
+   - `StringLiteral[13153]`: `"https://api.app.pokemonchampions.jp"` $\rightarrow$ `"http://164.152.40.114:443"`
+   - `StringLiteral[10175]`: Regex de validação de `envLs` $\rightarrow$ `"^https?://.*$"`
+   - `StringLiteral[10176]`: Segundo Regex de `SetApiEndpoint` $\rightarrow$ `"^https?://.*$"`
+3. **Desbloqueio de HTTP Cleartext no `libunity.so` (`split_config.arm64_v8a.apk`):**
+   - O `UnityWebRequest` nativo bloqueia URLs iniciadas por `"http://"` quando a flag de segurança está ativa. O patcher altera a string literal `"http://"` do validador de bloqueio em `libunity.so` para `"xttp://"`, permitindo tráfego HTTP direto na porta `443` sem exigir certificado Root CA no Android.
+4. **Patches em `libil2cpp.so` (`split_config.arm64_v8a.apk`):**
+   - Neutraliza checagens restritivas de hash/ambiente em `Net.dll`.
 
-```powershell
-python scripts/deploy_champ_oracle.py --key "CAMINHO_COMPLETO_DA_CHAVE.key"
+### Como Regerar e Instalar o APK no Celular via ADB
+```bash
+# 1. Gerar e assinar os 3 splits em build_apk/
+python3 scripts/gerar_apk_modificado.py --url "http://164.152.40.114:443"
+
+# 2. Instalar no celular conectado via USB
+./instalar_no_celular.sh
 ```
-
-O script irá automaticamente:
-1. Compilar `pokechamp-server-linux-arm64` e `pokechamp-server-linux-amd64`.
-2. Enviar os binários e `instalar_champ_oracle.sh` para `/tmp/pokechamp_deploy` em `ubuntu@164.152.40.114`.
-3. Instalar o serviço `pokechamp.service` em `/opt/pokechamp-server`, liberar as portas `9443` e `9080` no `iptables` da VM (sem afetar o `ptcgp.service` na `8443`) e iniciar o servidor.
-
-### Passo 2: Liberar a Regra de Entrada (Ingress Rule) no Painel da Oracle Cloud (VCN)
-Se o teste externo em `https://164.152.40.114:9443/health` ou `http://164.152.40.114:9080/admin` der timeout:
-- Lembre o usuário de adicionar no painel web da **Oracle Cloud -> Networking -> Virtual Cloud Networks -> Security Lists -> Ingress Rules**:
-  - **Source CIDR:** `0.0.0.0/0`
-  - **IP Protocol:** `TCP`
-  - **Destination Port Range:** `9443` e `9080`
-
-### Passo 3: Verificar o Servidor e o Painel Admin
-Teste a resposta da VM:
-```powershell
-curl.exe -k https://164.152.40.114:9443/health
-```
-E acesse o painel de gerenciamento da Box Pokémon pelo navegador:
-- `http://164.152.40.114:9080/admin`
-
-### Passo 4: Gerar e Assinar o APK Modificado para o Celular / Emulador
-1. Gere os APKs modificados apontando para a Oracle Cloud:
-   ```powershell
-   python scripts/gerar_apk_modificado.py --url "https://164.152.40.114:9443" --extracted-dir "CAMINHO_DOS_SPLITS_EXTRAIDOS"
-   ```
-   *(Importante: Se o Android rejeitar o certificado autoassinado no `UnityWebRequest`, você também pode usar `--url "http://164.152.40.114:9080"` pois o `StringLiteral[10175]` foi atualizado para `^https?://.*$`, permitindo HTTP direto na porta `9080` sem barreiras de SSL/TLS pinning!).*
-2. Copie o `split_UnityDataAssetPack.apk` para a pasta `build_apk/` junto com `base.patched.apk` e `split_config.arm64_v8a.patched.apk` e assine todos juntos com a mesma chave usando `uber-apk-signer`:
-   ```powershell
-   java -jar uber-apk-signer.jar -a build_apk/ --allowResign
-   ```
-3. Instale os 3 splits assinados no dispositivo Android:
-   ```powershell
-   adb install-multiple build_apk/*aligned-debugSigned.apk
-   ```

@@ -90,11 +90,28 @@ def patch_libil2cpp(so_bytes: bytes) -> bytes:
     return bytes(buf)
 
 
+def patch_libunity(so_bytes: bytes) -> bytes:
+    buf = bytearray(so_bytes)
+    # Em libunity.so PT_LOAD[1], file_offset = va - 0x4000
+    # 0xcee6bc (file 0xcea6bc): CheckInsecureHttpOption -> MOV W0, #1; RET (0x52800020, 0xd65f03c0)
+    # 0xcee2ec (file 0xcea2ec): TBZ W0, #0, 0xcee428     -> NOP (0xd503201f)
+    patches = [
+        (0xCEE6BC - 0x4000, 0xD503233F, 0x52800020, "Allow HTTP in UnityWebRequest (MOV W0, #1)"),
+        (0xCEE6C0 - 0x4000, 0xD10303FF, 0xD65F03C0, "Allow HTTP in UnityWebRequest (RET)"),
+        (0xCEE2EC - 0x4000, 0x360009E0, 0xD503201F, "Bypass Non-secure network connections check (NOP)"),
+    ]
+    for off, expected, replacement, desc in patches:
+        cur = struct.unpack_from("<I", buf, off)[0]
+        struct.pack_into("<I", buf, off, replacement)
+        print(f"  [OK] libunity.so @ off 0x{off:x}: 0x{cur:08x} -> 0x{replacement:08x} ({desc})")
+    return bytes(buf)
+
+
 def replace_in_zip(src_zip: Path, dst_zip: Path, replacements: dict[str, bytes]):
     with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(dst_zip, "w") as zout:
         for item in zin.infolist():
             if item.filename in replacements:
-                # libil2cpp.so precisa ficar STORED (sem compressão) para carregamento direto se extractNativeLibs=false
+                # .so precisa ficar STORED (sem compressão)
                 if item.filename.endswith(".so"):
                     item.compress_type = zipfile.ZIP_STORED
                 zout.writestr(item, replacements[item.filename])
@@ -106,7 +123,7 @@ def main():
     parser = argparse.ArgumentParser(description="Gera os APKs modificados do Pokémon Champions para o Servidor Privado")
     parser.add_argument("--url", default="http://164.152.40.114:443", help="URL do Servidor Privado (máx 35 chars)")
     parser.add_argument("--extracted-dir", default=str(DEFAULT_EXTRACTED_DIR), help="Pasta com base.apk e split_config.arm64_v8a.apk")
-    parser.add_argument("--skip-so-patch", action="store_true", help="Não aplica patch em libil2cpp.so (usa AES-256-CBC nativo)")
+    parser.add_argument("--skip-so-patch", action="store_true", help="Não aplica patch em libil2cpp.so/libunity.so")
     args = parser.parse_args()
 
     ext_dir = Path(args.extracted_dir)
@@ -138,12 +155,21 @@ def main():
     )
 
     if not args.skip_so_patch and arm64_apk.exists():
-        print("[3/3] Aplicando patch em libil2cpp.so dentro de split_config.arm64_v8a.apk...")
+        print("[3/3] Aplicando patches em libil2cpp.so e libunity.so dentro de split_config.arm64_v8a.apk...")
         with zipfile.ZipFile(arm64_apk, "r") as z:
             orig_so = z.read("lib/arm64-v8a/libil2cpp.so")
+            orig_unity = z.read("lib/arm64-v8a/libunity.so")
         patched_so = patch_libil2cpp(orig_so)
+        patched_unity = patch_libunity(orig_unity)
         out_arm64 = OUT_DIR / "split_config.arm64_v8a.patched.apk"
-        replace_in_zip(arm64_apk, out_arm64, {"lib/arm64-v8a/libil2cpp.so": patched_so})
+        replace_in_zip(
+            arm64_apk,
+            out_arm64,
+            {
+                "lib/arm64-v8a/libil2cpp.so": patched_so,
+                "lib/arm64-v8a/libunity.so": patched_unity,
+            },
+        )
     else:
         print("[3/3] Pulando patch em libil2cpp.so (servidor já suporta criptografia nativa).")
         if arm64_apk.exists():
