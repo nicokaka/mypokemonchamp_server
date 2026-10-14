@@ -77,6 +77,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/reset", s.handleAdminReset)
 	mux.Handle("/ws", s.WSHandler)
 	mux.Handle("/battle/ws", s.WSHandler)
+	mux.HandleFunc("/md/", s.handleMasterData)
 
 	// Catch-all for /auth/* and /api/*
 	mux.HandleFunc("/", s.handleGameRequest)
@@ -145,21 +146,21 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 		dmy = fmt.Sprintf("%d", nowUnix)
 	}
 
+	sTimeStr := fmt.Sprintf("%d", nowUnix)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("X-PKB-S-TIME", fmt.Sprintf("%d", nowUnix))
+	w.Header().Set("X-PKB-S-TIME", sTimeStr)
 	w.Header().Set("X-PKB-DMY-VAL", dmy)
+	w.Header()["X-PKB-S-TIME"] = []string{sTimeStr}
+	w.Header()["X-PKB-DMY-VAL"] = []string{dmy}
 
 	tmv := uint32(1)
 	ppv := uint32(1)
 	wvv := uint32(1)
 	sexp := 86400
 
-	// Note: Asset and Md are intentionally nil (omitted) so ApiBase::CheckResponseBodyBase (0x451d9d8)
-	// does NOT overwrite the client's official CDN AssetBundleDomain / MasterDataDomain.
-	// Sid at the top-level envelope is also omitted so CheckResponseBodyBase does not attempt
-	// DecryptResponseSessionIdApi (0x4539f40) on a plain session ID.
 	resp := model.ApiResponseEnvelope{
 		Code: 0,
+		Md:   s.buildMdListMeta(r),
 		TmV:  &tmv,
 		PpV:  &ppv,
 		WvV:  &wvv,
@@ -169,8 +170,6 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 	}
 
 	// Always populate resp.Pmc unless explicitly disabled (?encrypt=0).
-	// Disassembly of Net.ApiTemplate::ParseResponse (0x2dd2b58) proves that Unity's JsonUtility
-	// only deserializes ResponseBodyBase.pmc and then calls body.set_pmp(...) after decrypting pmc.
 	if r.URL.Query().Get("encrypt") != "0" {
 		if b, err := json.Marshal(pmp); err == nil {
 			st := s.Store.GetState()
@@ -182,6 +181,7 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 			}
 			if enc != "" {
 				w.Header().Set("X-PKB-ENCRYPT", "1")
+				w.Header()["X-PKB-ENCRYPT"] = []string{"1"}
 				resp.Pmc = enc
 			}
 		}

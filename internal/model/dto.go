@@ -29,7 +29,7 @@ type ApiResponseEnvelope struct {
 	Esetype string               `json:"esetype,omitempty"`
 	Pmc     string               `json:"pmc,omitempty"`
 	Msg     string               `json:"msg,omitempty"`
-	Md      *MdMeta              `json:"md,omitempty"`
+	Md      *MdListMeta          `json:"md,omitempty"`
 	TmV     *uint32              `json:"tmV,omitempty"`
 	TmU     string               `json:"tmU,omitempty"`
 	PpV     *uint32              `json:"ppV,omitempty"`
@@ -54,10 +54,33 @@ type ApiResponseEnvelope struct {
 	Pmp     interface{}          `json:"pmp,omitempty"`
 }
 
+// MdListMeta represents Net.MdListMeta (Type 14453) in ApiResponseBodyBase.md.
+type MdListMeta struct {
+	Ver  int    `json:"ver"`
+	Tim  int    `json:"tim"`
+	Ra   string `json:"ra"`
+	Cry  int    `json:"cry"`
+	Dom  string `json:"dom"`
+	Ljhs string `json:"ljhs"`
+	Lchs string `json:"lchs"`
+	Lsiz int    `json:"lsiz"`
+}
+
+// MdMeta represents Net.MdMeta (Type 14454) in MdMetaList.list.
 type MdMeta struct {
-	Ver int               `json:"ver"`
-	Dom string            `json:"dom"`
-	Fls map[string]string `json:"fls,omitempty"`
+	Name string `json:"name,omitempty"`
+	Ver  int    `json:"ver"`
+	Tim  int    `json:"tim"`
+	Ra   string `json:"ra"`
+	Chs  string `json:"chs"`
+	Jhs  string `json:"jhs"`
+	Siz  int    `json:"siz"`
+	Nse  string `json:"nse"`
+}
+
+// MdMetaList represents Net.MdMetaList (Type 14455).
+type MdMetaList struct {
+	List []MdMeta `json:"list"`
 }
 
 type ResponseAssetBundle struct {
