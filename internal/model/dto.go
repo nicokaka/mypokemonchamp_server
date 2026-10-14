@@ -79,11 +79,11 @@ type AuthGetTokenPmp struct {
 
 // AuthRegisterUserPmp represents Net.ApiAuthRegisterUserResponseParam.UniqueParam (Type 14047).
 type AuthRegisterUserPmp struct {
-	Uuid   string        `json:"uuid"`
-	Supid  string        `json:"supid"`
-	Dvcode string        `json:"dvcode"`
-	Lista  []interface{} `json:"lista"`
-	UD     *ApiUdParam   `json:"UD,omitempty"`
+	Uuid   string          `json:"uuid"`
+	Supid  string          `json:"supid"`
+	Dvcode string          `json:"dvcode"`
+	Lista  map[string]byte `json:"lista"`
+	UD     *ApiUdParam     `json:"UD,omitempty"`
 }
 
 type LoginTimeOffset struct {
@@ -157,86 +157,88 @@ type ApiUdParam struct {
 	Prfsumdt map[string]interface{}               `json:"prfsumdt,omitempty"`
 	Usedhis  map[string]interface{}               `json:"usedhis,omitempty"`
 	Freebox  map[string]interface{}               `json:"freebox,omitempty"`
-	UdVer    int                                  `json:"udVer"`
+	UdVer    int64                                `json:"udVer"`
 }
 
 // ApiUserProfileParam represents Net.ApiUserProfileParam (Type 14141).
 type ApiUserProfileParam struct {
-	AgTA   uint64 `json:"agTA"`
-	Bth    int    `json:"bth"`
-	Clogc  int    `json:"clogc"`
-	Cou    int    `json:"cou"`
-	CreAt  uint64 `json:"creAt"`
-	Flng   int    `json:"flng"`
-	Fri    string `json:"fri"`
-	Id     string `json:"id"`
-	Lavsp  int    `json:"lavsp"`
-	Lavsw  int    `json:"lavsw"`
-	Llday  uint64 `json:"llday"`
-	Lldaz  uint64 `json:"lldaz"`
-	Llog   uint64 `json:"llog"`
-	Lng    int    `json:"lng"`
-	Mode   int    `json:"mode"`
-	Motim  uint64 `json:"motim"`
-	Nam    string `json:"nam"`
-	PpV    uint32 `json:"ppV"`
-	Push   int    `json:"push"`
-	Sup    string `json:"sup"`
-	Tlogc  int    `json:"tlogc"`
-	TmV    uint32 `json:"tmV"`
-	Tzof   int    `json:"tzof"`
-	Delsts int    `json:"delsts"`
-	DeTok  string `json:"deTok"`
-	Dv     string `json:"dv"`
-	Os     string `json:"os"`
-	Trtit  int    `json:"trtit"`
-	Trico  int    `json:"trico"`
-	Trbad  int    `json:"trbad"`
-	TrnId  string `json:"trnId"`
-	TrCAt  uint64 `json:"trCAt"`
-	TrIAt  uint64 `json:"trIAt"`
-	UpRAt  uint64 `json:"upRAt"`
-	UpRCt  int    `json:"upRCt"`
-	SwPNam string `json:"swPNam"`
-	SwBtDt uint64 `json:"swBtDt"`
-	SwPrDt int    `json:"swPrDt"`
-	AcFrRq int    `json:"acFrRq"`
-	UplAt  uint64 `json:"uplAt"`
-	HbuNam string `json:"hbuNam"`
+	AgTA   int64    `json:"agTA"`
+	Bth    int      `json:"bth"`
+	Clogc  int64    `json:"clogc"`
+	Cou    int      `json:"cou"`
+	CreAt  int64    `json:"creAt"`
+	Flng   int      `json:"flng"`
+	Fri    string   `json:"fri"`
+	Id     string   `json:"id"`
+	Lavsp  string   `json:"lavsp"`
+	Lavsw  string   `json:"lavsw"`
+	Llday  int      `json:"llday"`
+	Lldaz  int      `json:"lldaz"`
+	Llog   int64    `json:"llog"`
+	Lng    int      `json:"lng"`
+	Mode   int      `json:"mode"`
+	Motim  int64    `json:"motim"`
+	Nam    string   `json:"nam"`
+	PpV    int      `json:"ppV"`
+	Push   byte     `json:"push"`
+	Sup    string   `json:"sup"`
+	Tlogc  int64    `json:"tlogc"`
+	TmV    int      `json:"tmV"`
+	Tzof   int      `json:"tzof"`
+	Delsts int      `json:"delsts"`
+	DeTok  string   `json:"deTok"`
+	Dv     string   `json:"dv"`
+	Os     string   `json:"os"`
+	Trtit  string   `json:"trtit"`
+	Trico  string   `json:"trico"`
+	Trbad  []string `json:"trbad"`
+	TrnId  string   `json:"trnId"`
+	TrCAt  uint64   `json:"trCAt"`
+	TrIAt  uint64   `json:"trIAt"`
+	UpRAt  uint64   `json:"upRAt"`
+	UpRCt  int      `json:"upRCt"`
+	SwPNam byte     `json:"swPNam"`
+	SwBtDt byte     `json:"swBtDt"`
+	SwPrDt byte     `json:"swPrDt"`
+	AcFrRq byte     `json:"acFrRq"`
+	UplAt  uint64   `json:"uplAt"`
+	HbuNam byte     `json:"hbuNam"`
 }
 
 // ApiUserMainParam represents Net.ApiUserMainParam (Type 14123).
 type ApiUserMainParam struct {
-	Vp       int                    `json:"vp"`
-	TuPrg    int                    `json:"tuPrg"`
-	TuFlgs   []int                  `json:"tuFlgs"`
-	Pbsiz    int                    `json:"pbsiz"`
-	Pbexc    int                    `json:"pbexc"`
-	Pcnt     int                    `json:"pcnt"`
-	Ssnno    int                    `json:"ssnno"`
-	Bpasi    map[string]interface{} `json:"bpasi"`
-	Subsc    map[string]interface{} `json:"subsc"`
-	Misri    map[string]interface{} `json:"misri"`
-	Emisi    map[string]interface{} `json:"emisi"`
-	Putoi    []interface{}          `json:"putoi"`
-	Ptids    []int                  `json:"ptids"`
-	Nrmsgid  string                 `json:"nrmsgid"`
-	Lrlcst   uint64                 `json:"lrlcst"`
-	Mxrnk    int                    `json:"mxrnk"`
-	Nwnver   int                    `json:"nwnver"`
-	Ngunmflg int                    `json:"ngunmflg"`
-	Vpbcnt   int                    `json:"vpbcnt"`
-	Fcbs     int                    `json:"fcbs"`
-	Fpbs     int                    `json:"fpbs"`
-	Swpai    map[string]interface{} `json:"swpai"`
+	Vp       int64                         `json:"vp"`
+	TuPrg    int                           `json:"tuPrg"`
+	TuFlgs   []int                         `json:"tuFlgs"`
+	Pbsiz    int                           `json:"pbsiz"`
+	Pbexc    int                           `json:"pbexc"`
+	Pcnt     int                           `json:"pcnt"`
+	Ssnno    int                           `json:"ssnno"`
+	Bpasi    map[string]interface{}        `json:"bpasi"`
+	Subsc    map[string]interface{}        `json:"subsc"`
+	Misri    map[string]interface{}        `json:"misri"`
+	Emisi    map[string]interface{}        `json:"emisi"`
+	Putoi    map[string]map[string]int     `json:"putoi"`
+	Ptids    []interface{}                 `json:"ptids"`
+	Nrmsgid  string                        `json:"nrmsgid"`
+	Lrlcst   uint64                        `json:"lrlcst"`
+	Mxrnk    uint32                        `json:"mxrnk"`
+	Nwnver   uint32                        `json:"nwnver"`
+	Ngunmflg byte                          `json:"ngunmflg"`
+	Vpbcnt   int                           `json:"vpbcnt"`
+	Fcbs     int64                         `json:"fcbs"`
+	Fpbs     int64                         `json:"fpbs"`
+	Swpai    map[string]interface{}        `json:"swpai"`
 }
 
+// ApiUserAvatarParam represents Net.ApiUserAvatarParam (Type 14092).
 type ApiUserAvatarParam struct {
 	Fac map[string]int `json:"fac"`
 	Cos map[string]int `json:"cos"`
 	Mot map[string]int `json:"mot"`
 }
 
+// ApiUserTeamItemParam represents Net.ApiUserTeamItemParam (Type 14164).
 type ApiUserTeamItemParam struct {
 	P string `json:"p"`
 	I int    `json:"i"`
@@ -244,7 +246,7 @@ type ApiUserTeamItemParam struct {
 
 // ApiUserTeamParam represents Net.ApiUserTeamParam (Type 14168).
 type ApiUserTeamParam struct {
-	Tid    string                 `json:"tid"`
+	Tid    int                    `json:"tid"`
 	Nam    string                 `json:"nam"`
 	Lng    int                    `json:"lng"`
 	Mem    []string               `json:"mem"`
@@ -254,8 +256,10 @@ type ApiUserTeamParam struct {
 }
 
 // ApiUserPokemonParam represents Net.ApiUserPokemonParam (Type 14138).
+// Note: Bf MUST be []uint16 (ushort[]) and NOT []byte, because Go's encoding/json
+// encodes []byte as a Base64 string instead of a JSON integer array!
 type ApiUserPokemonParam struct {
-	Ver int      `json:"ver"`
+	Ver uint32   `json:"ver"`
 	A0  string   `json:"a0"` // Origin ID / Trainer ID
 	A1  string   `json:"a1"` // Unique ID
 	A5  byte     `json:"a5"` // Origin Type / Rental flag
@@ -264,13 +268,13 @@ type ApiUserPokemonParam struct {
 	A8  uint64   `json:"a8"` // Rental Expire
 	A9  string   `json:"a9"` // HOME ID
 	Aa  uint64   `json:"aa"` // Timestamp
-	B0  int      `json:"b0"` // Encryption Constant / PID
+	B0  uint32   `json:"b0"` // Encryption Constant / PID
 	B1  uint16   `json:"b1"` // National Dex ID (MonsNo)
 	B2  byte     `json:"b2"` // Form No
 	B3  byte     `json:"b3"` // Gender (0=M, 1=F, 2=Genderless)
-	B4  int      `json:"b4"` // Experience / Level50
+	B4  uint32   `json:"b4"` // Experience / Level50
 	B5  uint16   `json:"b5"` // Ability ID (Tokusei)
-	B6  []uint16 `json:"b6"` // Active Moves (Waza 1..4)
+	B6  []int16  `json:"b6"` // Active Moves (Waza 1..4) - short[]
 	B7  uint16   `json:"b7"` // Held Item
 	B8  uint16   `json:"b8"` // PokeBall ID
 	B9  byte     `json:"b9"` // EV HP (BasePoint)
@@ -279,61 +283,139 @@ type ApiUserPokemonParam struct {
 	Bc  byte     `json:"bc"` // EV Spd
 	Bd  byte     `json:"bd"` // EV SpAtk
 	Be  byte     `json:"be"` // EV SpDef
-	Bf  []byte   `json:"bf"` // IVs (6 bytes: 31,31,31,31,31,31)
-	Bg  []int    `json:"bg"` // Move PP Ups
-	Bh  []uint16 `json:"bh"` // Learned Moves
+	Bf  []uint16 `json:"bf"` // IVs (ushort[6]: 31,31,31,31,31,31)
+	Bg  []int64  `json:"bg"` // Move PP Ups - long[]
+	Bh  []int16  `json:"bh"` // Learned Moves - short[]
 	Bi  uint16   `json:"bi"` // Initial Ability
 	Bj  byte     `json:"bj"` // Nature (Seikaku)
 	Bk  byte     `json:"bk"` // Mint Nature (Seikaku Hosei)
 	Bl  byte     `json:"bl"` // Shiny Flag (0=Normal, 1=Shiny)
-	Bm  int      `json:"bm"` // Tera Type / Gimmick Type
+	Bm  uint32   `json:"bm"` // Tera Type / Gimmick Type
 	Bn  byte     `json:"bn"` // Language
 	Bo  string   `json:"bo"` // Nickname
 	Bp  byte     `json:"bp"` // Nickname Flag
 	Bt  uint16   `json:"bt"` // Height / Scale
 	Bu  uint16   `json:"bu"` // Weight
-	Bv  []int    `json:"bv"` // Ribbons
-	Bw  byte     `json:"bw"` //Equipped Ribbon
+	Bv  []int64  `json:"bv"` // Ribbons - long[]
+	Bw  byte     `json:"bw"` // Equipped Ribbon
 	Bx  string   `json:"bx"` // Original Trainer Name (OT)
 	By  byte     `json:"by"` // OT Gender
-	I   int      `json:"i"`  // Box Slot Index
+	I   uint32   `json:"i"`  // Box Slot Index
 }
 
+// ApiUserTrainingCodeItemParam represents Net.ApiUserTrainingCodeItemParam (Type 14177).
+type ApiUserTrainingCodeItemParam struct {
+	Idx int `json:"idx"`
+	I   int `json:"i"`
+}
+
+// ApiUserTrainingCodeParam represents Net.ApiUserTrainingCodeParam (Type 14176).
 type ApiUserTrainingCodeParam struct {
-	Ver   int                    `json:"ver"`
-	Tnam  string                 `json:"tnam"`
-	Tlng  int                    `json:"tlng"`
-	Unam  string                 `json:"unam"`
-	Ulng  int                    `json:"ulng"`
-	Trico int                    `json:"trico"`
-	Mem   []string               `json:"mem"`
-	Itms  []ApiUserTeamItemParam `json:"itms"`
-	Fav   byte                   `json:"fav"`
-	CreAt uint64                 `json:"creAt"`
+	Ver   uint32                         `json:"ver"`
+	Tnam  string                         `json:"tnam"`
+	Tlng  int                            `json:"tlng"`
+	Unam  string                         `json:"unam"`
+	Ulng  int                            `json:"ulng"`
+	Trico string                         `json:"trico"`
+	Mem   []ApiUserPokemonParam          `json:"mem"`
+	Itms  []ApiUserTrainingCodeItemParam `json:"itms"`
+	Fav   byte                           `json:"fav"`
+	CreAt uint64                         `json:"creAt"`
+}
+
+// ApiRateParam represents Net.ApiRateParam (Type 13979).
+type ApiRateParam struct {
+	Ra *float32 `json:"ra,omitempty"`
+}
+
+// ApiTeamParam represents Net.ApiTeamParam (Type 13978) used in battle match/resume.
+type ApiTeamParam struct {
+	Fri   string                `json:"fri"`
+	Nam   string                `json:"nam"`
+	Lng   int                   `json:"lng"`
+	Cou   int                   `json:"cou"`
+	Trtit string                `json:"trtit"`
+	Trico string                `json:"trico"`
+	Trbad []string              `json:"trbad"`
+	Rk    int16                 `json:"rk"`
+	Wic   int                   `json:"wic"`
+	Rat   ApiRateParam          `json:"rat"`
+	Par   int                   `json:"par"`
+	Tme   []ApiUserPokemonParam `json:"tme"`
+	Bamin int                   `json:"bamin"`
+	Ava   ApiUserAvatarParam    `json:"ava"`
+	Tse   []int                 `json:"tse"`
+}
+
+// SpecialRuleSetting represents Net.SpecialRuleSetting (Type 13613).
+type SpecialRuleSetting struct {
+	Typ int `json:"typ"`
+	Use int `json:"use"`
 }
 
 // BattleStartMatchingPmp represents Net.ApiBattleStartMatchingResponseParam.UniqueParam (Type 13616).
 type BattleStartMatchingPmp struct {
-	Ws   string      `json:"ws"`
-	Atk  string      `json:"atk"`
-	Exp  uint64      `json:"exp"`
-	Ehsh string      `json:"ehsh"`
-	UD   *ApiUdParam `json:"UD,omitempty"`
+	Exp    int         `json:"exp"`
+	Atk    string      `json:"atk"`
+	Ehsh   string      `json:"ehsh"`
+	Ws     string      `json:"ws"`
+	Type   string      `json:"type"`
+	Bamin  int         `json:"bamin"`
+	Lmst   uint64      `json:"lmst"`
+	Mawarn byte        `json:"mawarn"`
+	Mast   uint64      `json:"mast"`
+	UD     *ApiUdParam `json:"UD,omitempty"`
 }
 
 // BattleStartBattlePmp represents Net.ApiBattleStartBattleResponseParam.UniqueParam (Type 13611).
 type BattleStartBattlePmp struct {
-	Rmid   string      `json:"rmid"`
-	Sprule int         `json:"sprule"`
-	UD     *ApiUdParam `json:"UD,omitempty"`
+	Rmid   string               `json:"rmid"`
+	Sprule []SpecialRuleSetting `json:"sprule"`
+	Exp    *int                 `json:"exp,omitempty"`
+	Atk    string               `json:"atk"`
+	Ehsh   string               `json:"ehsh"`
+	Ws     string               `json:"ws"`
+	Type   string               `json:"type"`
+	UD     *ApiUdParam          `json:"UD,omitempty"`
+}
+
+// ApiBattleEndUserResourceParam represents Net.ApiBattleEndUserResourceParam (Type 13586).
+type ApiBattleEndUserResourceParam struct {
+	Type int16 `json:"type"`
+	Id   int   `json:"id"`
+	Num  int   `json:"num"`
+}
+
+// ApiBattleEndBattleRewardParam represents Net.ApiBattleEndBattleRewardParam (Type 13585).
+type ApiBattleEndBattleRewardParam struct {
+	Reason   int                             `json:"reason"`
+	Param    int                             `json:"param"`
+	Resource []ApiBattleEndUserResourceParam `json:"resource"`
 }
 
 // BattleEndBattlePmp represents Net.ApiBattleEndBattleResponseParam.UniqueParam (Type 13583).
 type BattleEndBattlePmp struct {
-	Bca int           `json:"bca"`
-	Rul int           `json:"rul"`
-	Rw  []interface{} `json:"rw"`
-	UD  *ApiUdParam   `json:"UD,omitempty"`
+	Bca    byte                            `json:"bca"`
+	Rul    byte                            `json:"rul"`
+	Stt    int                             `json:"stt"`
+	Pobf   int                             `json:"pobf"`
+	Poaf   int                             `json:"poaf"`
+	Rkbf   int16                           `json:"rkbf"`
+	Rkaf   int16                           `json:"rkaf"`
+	Mrkbf  int16                           `json:"mrkbf"`
+	Mrkaf  int16                           `json:"mrkaf"`
+	Wicbf  int                             `json:"wicbf"`
+	Wicaf  int                             `json:"wicaf"`
+	Bopo   int                             `json:"bopo"`
+	Rabf   float32                         `json:"rabf"`
+	Raaf   float32                         `json:"raaf"`
+	Et     int                             `json:"et"`
+	Rwd    []ApiBattleEndBattleRewardParam `json:"rwd"`
+	Rank   *int                            `json:"rank,omitempty"`
+	Vpbm   int                             `json:"vpbm"`
+	Rptflg byte                            `json:"rptflg"`
+	Regag  byte                            `json:"regag"`
+	UD     *ApiUdParam                     `json:"UD,omitempty"`
 }
 
 // MdBotMergeParam represents Net.MdBotMergeParam (Type 14435) for AI opponents.

@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nicokaka/mypokechamp_server/internal/crypto"
@@ -16,10 +18,13 @@ import (
 )
 
 type Server struct {
-	Store     *store.Store
-	WSHandler *ws.Handler
-	PublicURL string
-	WSURL     string
+	Store      *store.Store
+	WSHandler  *ws.Handler
+	PublicURL  string
+	WSURL      string
+	trafficMu  sync.Mutex
+	trafficSeq int64
+	trafficLog []TrafficEntry
 }
 
 func NewServer(s *store.Store, publicURL, wsURL string) *Server {
@@ -34,8 +39,20 @@ func NewServer(s *store.Store, publicURL, wsURL string) *Server {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/admin", s.handleAdminUI)
+	mux.HandleFunc("/accounts", s.handleAdminUI)
 	mux.HandleFunc("/admin/api/state", s.handleAdminState)
+	mux.HandleFunc("/admin/api/traffic", s.handleAdminTraffic)
+	mux.HandleFunc("/admin/api/profile", s.handleAdminUpdateProfile)
+	mux.HandleFunc("/admin/api/avatar", s.handleAdminUpdateAvatar)
+	mux.HandleFunc("/admin/api/maxout", s.handleAdminMaxOut)
+	mux.HandleFunc("/admin/api/unlock-meta", s.handleAdminUnlockMeta)
 	mux.HandleFunc("/admin/api/pokemon", s.handleAdminAddPokemon)
+	mux.HandleFunc("/admin/api/pokemon/delete", s.handleAdminDeletePokemon)
+	mux.HandleFunc("/admin/api/team", s.handleAdminSaveTeam)
+	mux.HandleFunc("/admin/api/team/delete", s.handleAdminDeleteTeam)
+	mux.HandleFunc("/admin/api/bot", s.handleAdminSaveBot)
+	mux.HandleFunc("/admin/api/bot/delete", s.handleAdminDeleteBot)
+	mux.HandleFunc("/admin/api/reset", s.handleAdminReset)
 	mux.Handle("/ws", s.WSHandler)
 	mux.Handle("/battle/ws", s.WSHandler)
 
@@ -84,7 +101,7 @@ func (s *Server) decodeRequestPmp(r *http.Request) (model.ApiRequestEnvelope, ma
 			if sid == "" {
 				sid = st.SessionID
 			}
-			dec, err = crypto.DecryptPmcApi(env.Pmc, dmy, st.CsrfToken, sid, st.UdVer)
+			dec, err = crypto.DecryptPmcApi(env.Pmc, dmy, st.CsrfToken, sid, int(st.UdVer))
 		}
 		if err == nil && dec != "" {
 			log.Printf("  └─ [CRYPTO] Decrypted pmc (%d chars): %s", len(dec), truncate(dec, 180))
@@ -112,15 +129,18 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 	wvv := uint32(1)
 	sexp := 86400
 
+	// Note: Asset and Md are intentionally nil (omitted) so ApiBase::CheckResponseBodyBase (0x451d9d8)
+	// does NOT overwrite the client's official CDN AssetBundleDomain / MasterDataDomain.
+	// Sid at the top-level envelope is also omitted so CheckResponseBodyBase does not attempt
+	// DecryptResponseSessionIdApi (0x4539f40) on a plain session ID.
 	resp := model.ApiResponseEnvelope{
-		Code:  0,
-		TmV:   &tmv,
-		PpV:   &ppv,
-		WvV:   &wvv,
-		Sexp:  &sexp,
-		InH:   "inh_champ_2026",
-		Asset: &model.ResponseAssetBundle{Ver: "1.2.2", Dom: s.PublicURL},
-		Pmp:   pmp,
+		Code: 0,
+		TmV:  &tmv,
+		PpV:  &ppv,
+		WvV:  &wvv,
+		Sexp: &sexp,
+		InH:  "inh_champ_2026",
+		Pmp:  pmp,
 	}
 
 	// Optional pmc encryption if client explicitly forces encrypted response
@@ -131,7 +151,7 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 			if strings.HasPrefix(r.URL.Path, "/auth/") {
 				enc, _ = crypto.EncryptPmpAuth(string(b), dmy, nowUnix)
 			} else {
-				enc, _ = crypto.EncryptPmpApi(string(b), dmy, st.CsrfToken, st.SessionID, st.UdVer)
+				enc, _ = crypto.EncryptPmpApi(string(b), dmy, st.CsrfToken, st.SessionID, int(st.UdVer))
 			}
 			if enc != "" {
 				w.Header().Set("X-PKB-ENCRYPT", "1")
@@ -144,6 +164,10 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 }
 
 func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/" {
+		s.handleAdminUI(w, r)
+		return
+	}
 	start := time.Now()
 	path := r.URL.Path
 	log.Printf("[API] %s %s from %s (DMY=%s, ENC=%s)",
@@ -183,11 +207,11 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			Uuid:   st.UUID,
 			Supid:  st.SupportID,
 			Dvcode: st.DeviceCd,
-			Lista:  []interface{}{},
+			Lista:  map[string]byte{},
 			UD:     s.Store.BuildFullUD(),
 		})
 
-	case "/auth/login", "/auth/competition-mode-login":
+	case "/auth/login":
 		uuid, _ := pmpReq["uuid"].(string)
 		st = s.Store.UpdateAuth(uuid, "", st.CsrfToken, st.SessionID)
 		zero := 0
@@ -201,6 +225,15 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			Btl:      0,
 			Lby:      0,
 			UD:       s.Store.BuildFullUD(),
+		})
+
+	case "/auth/competition-mode-login":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"comid": "com_001",
+			"com":   map[string]interface{}{},
+			"ispar": 1,
+			"entdt": map[string]interface{}{},
+			"UD":    s.Store.BuildFullUD(),
 		})
 
 	case "/api/common/get-all-ud":
@@ -222,36 +255,123 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			UD:     s.Store.BuildFullUD(),
 		})
 
-	case "/api/training/update":
-		uid, _ := pmpReq["uid"].(string)
-		hp := byte(numOrZero(pmpReq["hp"]))
-		atk := byte(numOrZero(pmpReq["atk"]))
-		def := byte(numOrZero(pmpReq["def"]))
-		agi := byte(numOrZero(pmpReq["agi"]))
-		spatk := byte(numOrZero(pmpReq["spatk"]))
-		spdef := byte(numOrZero(pmpReq["spdef"]))
-		toku := uint16(numOrZero(pmpReq["toku"]))
-		sei := byte(numOrZero(pmpReq["sei"]))
-		var waza []uint16
-		if wList, ok := pmpReq["waza"].([]interface{}); ok {
-			for _, wItem := range wList {
-				waza = append(waza, uint16(numOrZero(wItem)))
+	case "/api/user/update":
+		var nam, trtit, trico string
+		var trbad []string
+		if prfMap, ok := pmpReq["prf"].(map[string]interface{}); ok {
+			nam, _ = prfMap["nam"].(string)
+			trtit, _ = prfMap["trtit"].(string)
+			trico, _ = prfMap["trico"].(string)
+			if tbList, ok := prfMap["trbad"].([]interface{}); ok {
+				for _, item := range tbList {
+					if sVal, ok := item.(string); ok {
+						trbad = append(trbad, sVal)
+					}
+				}
 			}
+		} else {
+			nam, _ = pmpReq["nam"].(string)
 		}
-		ud := s.Store.ApplyTraining(uid, hp, atk, def, agi, spatk, spdef, toku, sei, waza)
+		ud := s.Store.UpdateProfile(nam, trtit, trico, trbad)
+		stNow := s.Store.GetState()
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"prf": stNow.Profile,
+			"UD":  ud,
+		})
+
+	case "/api/avatar/update", "/api/avatar/preset/update", "/api/avatar/preset/delete":
+		var avat model.ApiUserAvatarParam
+		if b, err := json.Marshal(pmpReq); err == nil {
+			_ = json.Unmarshal(b, &avat)
+		}
+		ud := s.Store.UpdateAvatar(avat)
 		s.writeGameResponse(w, r, map[string]interface{}{
 			"UD": ud,
 		})
 
+	case "/api/training/update":
+		// Supports both list: Dictionary<string, TrainingRequestUniqueParam> (Type 14001) and direct uid fields
+		applyOne := func(m map[string]interface{}) {
+			uid, _ := m["uid"].(string)
+			if uid == "" {
+				return
+			}
+			hp := byte(numOrZero(m["hp"]))
+			atk := byte(numOrZero(m["atk"]))
+			def := byte(numOrZero(m["def"]))
+			agi := byte(numOrZero(m["agi"]))
+			spatk := byte(numOrZero(m["spatk"]))
+			spdef := byte(numOrZero(m["spdef"]))
+			toku := uint16(numOrZero(m["toku"]))
+			sei := byte(numOrZero(m["sei"]))
+			var waza []int16
+			if wList, ok := m["waza"].([]interface{}); ok {
+				for _, wItem := range wList {
+					waza = append(waza, int16(numOrZero(wItem)))
+				}
+			}
+			_ = s.Store.ApplyTraining(uid, hp, atk, def, agi, spatk, spdef, toku, sei, waza)
+		}
+		if listMap, ok := pmpReq["list"].(map[string]interface{}); ok && len(listMap) > 0 {
+			for k, v := range listMap {
+				if itemMap, ok := v.(map[string]interface{}); ok {
+					if _, hasUID := itemMap["uid"]; !hasUID {
+						itemMap["uid"] = k
+					}
+					applyOne(itemMap)
+				}
+			}
+		} else {
+			applyOne(pmpReq)
+		}
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"UD": s.Store.BuildFullUD(),
+		})
+
 	case "/api/team/update":
-		tid, _ := pmpReq["tid"].(string)
+		// Supports both ApiTeamUpdateRequestParam.UniqueParam.team (List<ApiUserTeamParam>, Type 13980)
+		// and direct single-team fields (tid, nam, mem).
+		if rawTeams, ok := pmpReq["team"]; ok {
+			var teams []model.ApiUserTeamParam
+			if b, err := json.Marshal(rawTeams); err == nil {
+				_ = json.Unmarshal(b, &teams)
+			}
+			if len(teams) > 0 {
+				ud := s.Store.UpdateTeams(teams)
+				s.writeGameResponse(w, r, map[string]interface{}{
+					"UD": ud,
+				})
+				break
+			}
+		}
+		tid := numOrZero(pmpReq["tid"])
+		if tid == 0 {
+			if tidStr, ok := pmpReq["tid"].(string); ok {
+				if parsed, err := strconv.Atoi(strings.TrimPrefix(tidStr, "team_0")); err == nil && parsed > 0 {
+					tid = parsed
+				} else {
+					tid = 1
+				}
+			} else {
+				tid = 1
+			}
+		}
 		nam, _ := pmpReq["nam"].(string)
+		if nam == "" {
+			nam = fmt.Sprintf("Team %d", tid)
+		}
 		var mem []string
 		if mList, ok := pmpReq["mem"].([]interface{}); ok {
 			for _, m := range mList {
 				if ms, ok := m.(string); ok {
 					mem = append(mem, ms)
 				}
+			}
+		}
+		var itms []model.ApiUserTeamItemParam
+		if iList, ok := pmpReq["itms"].([]interface{}); ok {
+			if b, err := json.Marshal(iList); err == nil {
+				_ = json.Unmarshal(b, &itms)
 			}
 		}
 		ud := s.Store.UpdateTeam(tid, model.ApiUserTeamParam{
@@ -261,66 +381,338 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 			Mem:    mem,
 			Cuflg:  1,
 			Dcuflg: 1,
+			Itms:   itms,
 		})
 		s.writeGameResponse(w, r, map[string]interface{}{
 			"UD": ud,
 		})
 
-	case "/api/battle/data/get-menu-data":
+	case "/api/team/delete":
+		tid := numOrZero(pmpReq["tid"])
+		ud := s.Store.DeleteTeam(tid)
 		s.writeGameResponse(w, r, map[string]interface{}{
-			"seas": []interface{}{
-				map[string]interface{}{
-					"etyp": 1,
-					"ssn":  1,
-					"st":   now - 86400,
-					"ed":   now + 2592000,
+			"UD": ud,
+		})
+
+	case "/api/box/nickname":
+		uid, _ := pmpReq["uid"].(string)
+		nickname, _ := pmpReq["bo"].(string)
+		if nickname == "" {
+			nickname, _ = pmpReq["nam"].(string)
+		}
+		ud := s.Store.UpdateNickname(uid, nickname)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"UD": ud,
+		})
+
+	case "/api/box/ribbon":
+		uid, _ := pmpReq["uid"].(string)
+		bw := byte(numOrZero(pmpReq["bw"]))
+		ud := s.Store.UpdateRibbon(uid, bw)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"UD": ud,
+		})
+
+	case "/api/box/goodbye-check":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"ent": []string{},
+			"UD":  s.Store.BuildFullUD(),
+		})
+
+	case "/api/box/goodbye":
+		var uids []string
+		if uList, ok := pmpReq["uids"].([]interface{}); ok {
+			for _, u := range uList {
+				if us, ok := u.(string); ok {
+					uids = append(uids, us)
+				}
+			}
+		}
+		ud := s.Store.DeletePokemons(uids)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"UD": ud,
+		})
+
+	case "/api/battle-data/get-menu-data", "/api/battle/data/get-menu-data":
+		// Net.ApiBattleDataGetMenuDataResponseParam.UniqueParam (Type 13577):
+		// seas is Dictionary<int, Dictionary<byte, ApiBattleDataGetMenuDataSeasonsData>>
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"seas": map[string]interface{}{
+				"1": map[string]interface{}{
+					"1": map[string]interface{}{
+						"etyp":   byte(1),
+						"eveid":  "season_01",
+						"esta":   now - 86400,
+						"eend":   now + 2592000,
+						"serc":   "reg_standard_01",
+						"serssn": 1,
+						"agst":   1,
+					},
 				},
 			},
 			"hist": []interface{}{},
 			"UD":   s.Store.BuildFullUD(),
 		})
 
-	case "/api/battle/regulation/get":
+	case "/api/battle-regulation/get", "/api/battle/regulation/get":
+		// Net.ApiBattleRegulationGetResponseParam.UniqueParam (Type 13589, 13591)
 		s.writeGameResponse(w, r, map[string]interface{}{
-			"regid": "reg_standard_01",
 			"reg": map[string]interface{}{
 				"regid":  "reg_standard_01",
-				"pnlist": []int{},
-				"wzlist": []int{},
-				"itlist": []int{},
+				"rtit":   "Standard Regulation A",
+				"opsta":  now - 86400,
+				"opend":  now + 2592000,
+				"brule":  byte(1),
+				"bamin":  900,
+				"bamax":  1200,
+				"limitp": 6,
+				"avapl":  map[string]interface{}{"pnlist": [][]int{}},
+				"ngwaza": map[string]interface{}{"wzlist": []int{}},
+				"ngitem": map[string]interface{}{"itlist": []int{}},
+				"btltyp": 1,
+				"tobtim": 900,
+				"platim": 60,
+				"comtim": 45,
+				"pkview": 1,
+				"pkvtim": 60,
+				"sprule": []map[string]interface{}{{"typ": byte(1), "use": byte(1)}},
+				"pnick":  1,
+				"titlev": 50,
 			},
 			"UD": s.Store.BuildFullUD(),
 		})
 
-	case "/api/battle/regulation/verify":
+	case "/api/battle-regulation/private-lobby-list", "/api/battle/regulation/private-lobby-list":
+		// Net.ApiBattleRegulationPrivateLobbyListResponseParam.UniqueParam (Type 13598)
 		s.writeGameResponse(w, r, map[string]interface{}{
-			"errs":  []interface{}{},
-			"derrs": map[string]interface{}{},
+			"regs": []interface{}{},
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/battle-regulation/verify", "/api/battle/regulation/verify":
+		// Net.ApiBattleRegulationVerifyResponseParam.UniqueParam (Type 13603)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"errs":  []int{},
+			"derrs": map[string][]int{},
 			"UD":    s.Store.BuildFullUD(),
 		})
 
 	case "/api/battle/start-matching":
+		// Net.ApiBattleStartMatchingResponseParam.UniqueParam (Type 13616)
 		s.writeGameResponse(w, r, model.BattleStartMatchingPmp{
-			Ws:   s.WSURL,
-			Atk:  "atk_bot_match_001",
-			Exp:  now + 3600,
-			Ehsh: "ehsh_bot_match_001",
-			UD:   s.Store.BuildFullUD(),
-		})
-
-	case "/api/battle/start-battle":
-		s.writeGameResponse(w, r, model.BattleStartBattlePmp{
-			Rmid:   "rm_bot_champion_001",
-			Sprule: 0,
+			Exp:    int(now + 3600),
+			Atk:    "atk_bot_match_001",
+			Ehsh:   "ehsh_bot_match_001",
+			Ws:     s.WSURL,
+			Type:   "match",
+			Bamin:  900,
+			Lmst:   now,
+			Mawarn: 0,
+			Mast:   now,
 			UD:     s.Store.BuildFullUD(),
 		})
 
+	case "/api/battle/start-battle":
+		// Net.ApiBattleStartBattleResponseParam.UniqueParam (Type 13611)
+		exp := int(now + 3600)
+		s.writeGameResponse(w, r, model.BattleStartBattlePmp{
+			Rmid:   "rm_bot_champion_001",
+			Sprule: []model.SpecialRuleSetting{{Typ: 1, Use: 1}},
+			Exp:    &exp,
+			Atk:    "atk_bot_match_001",
+			Ehsh:   "ehsh_bot_match_001",
+			Ws:     s.WSURL,
+			Type:   "battle",
+			UD:     s.Store.BuildFullUD(),
+		})
+
+	case "/api/battle/resume-matching":
+		// Net.ApiBattleResumeMatchingResponseParam.UniqueParam (Type 13607)
+		pTeam := s.Store.BuildPlayerBattleTeam()
+		bTeam := s.Store.BuildBotBattleTeam(0)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"rmid":   "rm_bot_champion_001",
+			"bca":    byte(1),
+			"rul":    byte(1),
+			"eveid":  "season_01",
+			"stage":  1,
+			"bgm":    1,
+			"pkview": 1,
+			"pkvtim": 60,
+			"sprule": []model.SpecialRuleSetting{{Typ: 1, Use: 1}},
+			"team":   []model.ApiTeamParam{pTeam, bTeam},
+			"stt":    1,
+			"exp":    int64(now + 3600),
+			"atk":    "atk_bot_match_001",
+			"ehsh":   "ehsh_bot_match_001",
+			"ws":     s.WSURL,
+			"type":   "battle",
+			"bamin":  900,
+			"rank":   1,
+			"UD":     s.Store.BuildFullUD(),
+		})
+
 	case "/api/battle/end-battle", "/api/battle/surrender-battle":
+		// Net.ApiBattleEndBattleResponseParam.UniqueParam (Type 13583)
+		rank := 1
 		s.writeGameResponse(w, r, model.BattleEndBattlePmp{
-			Bca: 1,
-			Rul: 1,
-			Rw:  []interface{}{},
-			UD:  s.Store.BuildFullUD(),
+			Bca:   1,
+			Rul:   1,
+			Stt:   1,
+			Pobf:  1500,
+			Poaf:  1550,
+			Rkbf:  10,
+			Rkaf:  10,
+			Mrkbf: 10,
+			Mrkaf: 10,
+			Wicbf: 10,
+			Wicaf: 11,
+			Bopo:  50,
+			Rabf:  1500.0,
+			Raaf:  1525.0,
+			Et:    1,
+			Rwd: []model.ApiBattleEndBattleRewardParam{
+				{
+					Reason: 1,
+					Param:  1,
+					Resource: []model.ApiBattleEndUserResourceParam{
+						{Type: 1, Id: 1, Num: 500},
+					},
+				},
+			},
+			Rank:   &rank,
+			Vpbm:   100,
+			Rptflg: 0,
+			Regag:  1,
+			UD:     s.Store.BuildFullUD(),
+		})
+
+	case "/api/lobby/create":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"exp":  int(now + 3600),
+			"atk":  "atk_lobby_001",
+			"ehsh": "ehsh_lobby_001",
+			"rmid": "rm_lobby_001",
+			"ws":   s.WSURL,
+			"type": "lobby",
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/lobby/join":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"exp":   int(now + 3600),
+			"atk":   "atk_lobby_001",
+			"ehsh":  "ehsh_lobby_001",
+			"ws":    s.WSURL,
+			"type":  "lobby",
+			"rul":   byte(1),
+			"regid": "reg_standard_01",
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/lobby/invited-list":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"list": map[string]interface{}{},
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/competition/top-list":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"coms": []interface{}{},
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/competition/list", "/api/competition/entered-list":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"coms":  []interface{}{},
+			"total": 0,
+			"ldcnt": 0,
+			"excnt": 0,
+			"ckey":  0,
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/competition/confirm-result":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"coms": map[string]interface{}{},
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/regular-event/confirm-result":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"eves": map[string]interface{}{},
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/ranking/regular-event/get-my-rank":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"ranks": map[string]int{"season_01": 1},
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/ranking/regular-event/get-my-result":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"rslts": map[string]interface{}{},
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/ranking/competition/get-my-rank":
+		rat := float32(1500.0)
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"rank": 1,
+			"rat":  &rat,
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/friend/list":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"mPrfs":   []interface{}{},
+			"updated": false,
+			"UD":      s.Store.BuildFullUD(),
+		})
+
+	case "/api/friend/request":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"sFIds": []interface{}{},
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/message/list":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"msgl":   []interface{}{},
+			"retyp":  byte(0),
+			"lmsgid": "",
+			"UD":     s.Store.BuildFullUD(),
+		})
+
+	case "/api/information/get-unread":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"unrids": []string{},
+			"UD":     s.Store.BuildFullUD(),
+		})
+
+	case "/api/information/read":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"result": true,
+			"UD":     s.Store.BuildFullUD(),
+		})
+
+	case "/api/ph-transfer/box":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"list": st.Pokemons,
+			"UD":   s.Store.BuildFullUD(),
+		})
+
+	case "/api/ph-transfer/receive":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"trrew": []interface{}{},
+			"UD":    s.Store.BuildFullUD(),
+		})
+
+	case "/api/switch/paid-check":
+		s.writeGameResponse(w, r, map[string]interface{}{
+			"purc": 1,
+			"UD":   s.Store.BuildFullUD(),
 		})
 
 	default:
@@ -331,63 +723,9 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	log.Printf("  └─ Respondido 200 OK em %v", time.Since(start))
-}
-
-func (s *Server) handleAdminState(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(s.Store.GetState())
-}
-
-func (s *Server) handleAdminAddPokemon(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		UID      string   `json:"uid"`
-		MonsNo   uint16   `json:"mons_no"`
-		Nickname string   `json:"nickname"`
-		Ability  uint16   `json:"ability"`
-		Item     uint16   `json:"item"`
-		Nature   byte     `json:"nature"`
-		Shiny    byte     `json:"shiny"`
-		TeraType int      `json:"tera_type"`
-		Moves    []uint16 `json:"moves"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if len(req.Moves) == 0 {
-		req.Moves = []uint16{85, 89, 53, 182}
-	}
-	p := model.ApiUserPokemonParam{
-		Ver: 1,
-		B1:  req.MonsNo,
-		B4:  125000,
-		B5:  req.Ability,
-		B6:  req.Moves,
-		B7:  req.Item,
-		B8:  4,
-		B9:  4,
-		Ba:  252,
-		Bc:  252,
-		Bj:  req.Nature,
-		Bk:  req.Nature,
-		Bl:  req.Shiny,
-		Bm:  req.TeraType,
-		Bn:  2,
-		Bo:  req.Nickname,
-	}
-	s.Store.AddOrUpdatePokemon(req.UID, p)
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
-}
-
-func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(adminHTML))
+	dur := time.Since(start)
+	s.recordTraffic(r.Method, path, dur, fmt.Sprintf("200 OK (ENC=%s)", r.Header.Get("X-PKB-ENCRYPT")))
+	log.Printf("  └─ Respondido 200 OK em %v", dur)
 }
 
 func numOrZero(v interface{}) int {
@@ -407,74 +745,3 @@ func truncate(s string, max int) string {
 	}
 	return s[:max] + "..."
 }
-
-const adminHTML = `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>MyPokeChamp Private Server - Painel Admin</title>
-<style>
-  body { background: #0f172a; color: #f8fafc; font-family: system-ui, sans-serif; margin: 0; padding: 24px; }
-  .container { max-width: 1000px; margin: 0 auto; }
-  h1 { color: #38bdf8; margin-bottom: 4px; }
-  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-top: 20px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
-  .poke { background: #0f172a; border: 1px solid #475569; border-radius: 8px; padding: 12px; }
-  .shiny { border-color: #facc15; }
-  input, button { padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #fff; margin: 4px; }
-  button { background: #0284c7; border: none; cursor: pointer; font-weight: bold; }
-  button:hover { background: #0369a1; }
-</style>
-</head>
-<body>
-<div class="container">
-  <h1>🏆 MyPokeChamp Private Server (v1.2.2-3859)</h1>
-  <p>Gerenciador de Box Pokémon, Times Competitivos e Bots</p>
-  <div class="card">
-    <h3>➕ Injetar Pokémon Competitivo na Box</h3>
-    <input id="mons_no" type="number" placeholder="Dex ID (ex: 6 = Charizard)" value="150">
-    <input id="nickname" type="text" placeholder="Nome / Nickname" value="Mewtwo">
-    <input id="ability" type="number" placeholder="Ability ID (ex: 46)" value="46">
-    <input id="item" type="number" placeholder="Item ID (ex: 270)" value="270">
-    <input id="shiny" type="number" placeholder="Shiny (1=Sim, 0=Não)" value="1">
-    <button onclick="addPoke()">Injetar na Box</button>
-  </div>
-  <div class="card">
-    <h3>📦 Pokémon na Box (<span id="cnt">0</span>)</h3>
-    <div id="box" class="grid"></div>
-  </div>
-</div>
-<script>
-async function load() {
-  const res = await fetch('/admin/api/state');
-  const st = await res.json();
-  const pokes = Object.values(st.pokemons || {});
-  document.getElementById('cnt').innerText = pokes.length;
-  document.getElementById('box').innerHTML = pokes.map(p =>
-    '<div class="poke ' + (p.bl ? 'shiny' : '') + '">' +
-    '<b>#' + p.b1 + ' ' + p.bo + (p.bl ? ' ✨' : '') + '</b><br>' +
-    '<small>UID: ' + p.a1 + ' | Item: ' + p.b7 + '<br>Moves: ' + (p.b6 || []).join(', ') + '</small>' +
-    '</div>'
-  ).join('');
-}
-async function addPoke() {
-  await fetch('/admin/api/pokemon', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      mons_no: parseInt(document.getElementById('mons_no').value),
-      nickname: document.getElementById('nickname').value,
-      ability: parseInt(document.getElementById('ability').value),
-      item: parseInt(document.getElementById('item').value),
-      shiny: parseInt(document.getElementById('shiny').value),
-      nature: 15,
-      tera_type: 1,
-      moves: [94, 58, 85, 182]
-    })
-  });
-  load();
-}
-load();
-</script>
-</body>
-</html>`

@@ -232,3 +232,45 @@ func DecryptPmcApi(pmcBase64, dummyValue, csrfToken, sessionId string, udVers ..
 	}
 	return "", fmt.Errorf("failed to decrypt API pmc")
 }
+
+// DecryptWSCommand decrypts WebSocket2.Message.WSSendCommand.dc using WebSocket2Manager::CommandKeyIv (0x2544c5c).
+func DecryptWSCommand(dcBase64, sid, token, dmy string) (string, error) {
+	trimmed := strings.TrimSpace(dcBase64)
+	if trimmed == "" {
+		return "", fmt.Errorf("empty dc")
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		return trimmed, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		return "", err
+	}
+	sha1Dmy := SHA1Hex(dmy)
+	md5Sha1Dmy := MD5Hex(sha1Dmy)
+	seps := []string{"$", "=", ";", ":", "-", "_", "|", "&", "/", ""}
+	for _, sep1 := range seps {
+		keyHex := MD5Hex(token+sep1+sid) + md5Sha1Dmy
+		keyBytes, err := hex.DecodeString(keyHex)
+		if err != nil {
+			continue
+		}
+		for _, sep2 := range seps {
+			ivHex := MD5Hex(token + sep2 + dmy)
+			ivBytes, err := hex.DecodeString(ivHex)
+			if err != nil {
+				continue
+			}
+			dec, err := AesDecrypt(raw, keyBytes, ivBytes)
+			if err != nil {
+				continue
+			}
+			unz, err := GZipDecode(dec)
+			if err == nil {
+				return string(unz), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("failed to decrypt WS dc")
+}
+

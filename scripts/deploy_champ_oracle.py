@@ -20,6 +20,7 @@ DEFAULT_KEY_CANDIDATES = [
     Path.home() / "Downloads" / "ssh-key-2026-09-19.key",
     Path.home() / "Desktop" / "ssh-key-2026-09-19.key",
     ROOT_DIR.parent / "mytcgserver" / "ssh-key-2026-09-19.key",
+    ROOT_DIR.parent / "tcg-makemoney" / "ssh-key-2026-09-19.key",
 ]
 
 

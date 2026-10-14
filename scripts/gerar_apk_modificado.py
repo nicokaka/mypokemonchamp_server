@@ -15,7 +15,7 @@ import zipfile
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_EXTRACTED_DIR = Path(r"C:\Users\nicolas\.gemini\antigravity\scratch\rea\apks\extracted")
+DEFAULT_EXTRACTED_DIR = ROOT_DIR / "apk" / "extracted"
 OUT_DIR = ROOT_DIR / "build_apk"
 
 

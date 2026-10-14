@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nicokaka/mypokechamp_server/internal/crypto"
+	"github.com/nicokaka/mypokechamp_server/internal/model"
 	"github.com/nicokaka/mypokechamp_server/internal/store"
 )
 
@@ -24,6 +27,17 @@ type Handler struct {
 
 func NewHandler(s *store.Store) *Handler {
 	return &Handler{Store: s}
+}
+
+type sessionState struct {
+	seqNo    uint16
+	asn      int
+	hasEntry bool
+}
+
+func packUnit(userIdx, pokeIdx, side, pos int) int16 {
+	u := (userIdx & 0xF) | ((pokeIdx & 0xF) << 4) | ((side & 0xF) << 8) | ((pos & 0xF) << 12)
+	return int16(uint16(u))
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +71,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sum := sha1.Sum([]byte(key + wsGUID))
 	accept := base64.StdEncoding.EncodeToString(sum[:])
 
+	protoHdr := ""
+	if rawProto := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Protocol")); rawProto != "" {
+		firstProto := strings.TrimSpace(strings.Split(rawProto, ",")[0])
+		if firstProto != "" {
+			protoHdr = "Sec-WebSocket-Protocol: " + firstProto + "\r\n"
+		}
+	}
+
 	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
+		"Sec-WebSocket-Accept: " + accept + "\r\n" +
+		protoHdr + "\r\n"
 	if _, err := rw.WriteString(resp); err != nil {
 		return
 	}
@@ -68,11 +91,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[WS] Cliente conectado ao Matchmaking/Battle WebSocket (%s)", r.RemoteAddr)
-	h.handleLoop(conn, rw)
+	log.Printf("[WS] Cliente conectado ao Matchmaking/Battle WebSocket2 (%s)", r.RemoteAddr)
+	sess := &sessionState{}
+	h.handleLoop(conn, rw, sess)
 }
 
-func (h *Handler) handleLoop(conn net.Conn, rw *bufio.ReadWriter) {
+func (h *Handler) handleLoop(conn net.Conn, rw *bufio.ReadWriter, sess *sessionState) {
 	for {
 		opcode, payload, err := readFrame(rw)
 		if err != nil {
@@ -88,140 +112,313 @@ func (h *Handler) handleLoop(conn net.Conn, rw *bufio.ReadWriter) {
 		case 0x9: // Ping
 			_ = writeFrame(rw, 0xA, payload)
 		case 0x1, 0x2: // Text / Binary
-			h.handleMessage(rw, payload)
+			h.handleMessage(rw, payload, sess)
 		}
 	}
 }
 
-func (h *Handler) handleMessage(rw *bufio.ReadWriter, payload []byte) {
+func cntAsString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		if val != "" {
+			return val
+		}
+		return "1"
+	case float64:
+		return fmt.Sprintf("%d", int64(val))
+	case int:
+		return fmt.Sprintf("%d", val)
+	default:
+		return "1"
+	}
+}
+
+func (h *Handler) handleMessage(rw *bufio.ReadWriter, payload []byte, sess *sessionState) {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		log.Printf("[WS] Frame não-JSON (%d bytes)", len(payload))
 		return
 	}
 	action, _ := msg["action"].(string)
-	cnt, _ := msg["cnt"].(float64)
-	now := uint64(time.Now().Unix())
-	log.Printf("[WS] Action recebida: %q (cnt=%v)", action, int(cnt))
+	cntStr := cntAsString(msg["cnt"])
+	dmy, _ := msg["dmy"].(string)
+	now := time.Now().Unix()
+	if dmy == "" {
+		dmy = fmt.Sprintf("%d", now)
+	}
+	log.Printf("[WS] Action recebida: %q (cnt=%s)", action, cntStr)
 
 	st := h.Store.GetState()
-	bot := st.Bots[0]
 	rmid := "rm_bot_champion_001"
+	actLower := strings.ToLower(action)
 
 	switch {
-	case strings.Contains(strings.ToLower(action), "startmatching") || strings.Contains(strings.ToLower(action), "match"):
-		// 1. Send MatchReady2
-		readyResp := map[string]interface{}{
-			"action": action,
+	case actLower == "send_start_matching" || strings.Contains(actLower, "startmatching") || strings.Contains(actLower, "start_matching"):
+		// 1. Acknowledge start matching (WebSocket2.WSAction.CL.RES_START_SUCCESS)
+		sendJSON(rw, map[string]interface{}{
+			"action": "res_start_matching",
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt),
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
+		})
+
+		// 2. Notify match ready (WebSocket2.WSAction.CL.SEND_MATCH_READY2)
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_match_ready2",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
 			"dp": map[string]interface{}{
 				"rmid": rmid,
 			},
-		}
-		sendJSON(rw, readyResp)
+		})
 
-		// 2. Immediately send MatchSuccess with Bot opponent
-		matchSuccess := map[string]interface{}{
-			"action": "MatchSuccess",
+		// 3. Also send MatchSuccess immediately with full player + bot teams (Net.ApiTeamParam[])
+		playerTeam := h.Store.BuildPlayerBattleTeam()
+		botTeam := h.Store.BuildBotBattleTeam(0)
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_match_success",
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt) + 1,
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
 			"dp": map[string]interface{}{
-				"bca":    1,
-				"rul":    1,
+				"bca":    byte(1),
+				"rul":    byte(1),
 				"stage":  1,
 				"pkview": 1,
 				"pkvtim": 60,
 				"rmid":   rmid,
-				"team": []interface{}{
-					map[string]interface{}{
-						"nam":    st.Profile.Nam,
-						"trnId":  st.Profile.TrnId,
-						"rat":    1500,
-						"avatar": st.Avatar,
-					},
-					map[string]interface{}{
-						"nam":    bot.TrainerName,
-						"trnId":  "BOT-CHAMP-001",
-						"rat":    bot.Ra,
-						"avatar": st.Avatar,
-						"mons":   bot.Mons,
-					},
-				},
+				"team":   []model.ApiTeamParam{playerTeam, botTeam},
 			},
-		}
-		sendJSON(rw, matchSuccess)
+			"dg": "",
+			"dc": "",
+		})
 
-	case strings.Contains(strings.ToLower(action), "pokemonselect") || strings.Contains(strings.ToLower(action), "readyok"):
-		resp := map[string]interface{}{
-			"action": action,
+	case actLower == "send_ready_ok" || strings.Contains(actLower, "readyok") || strings.Contains(actLower, "ready_ok"):
+		playerTeam := h.Store.BuildPlayerBattleTeam()
+		botTeam := h.Store.BuildBotBattleTeam(0)
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_match_success",
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt),
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
 			"dp": map[string]interface{}{
-				"rmid":  rmid,
+				"bca":    byte(1),
+				"rul":    byte(1),
+				"stage":  1,
+				"pkview": 1,
+				"pkvtim": 60,
+				"rmid":   rmid,
+				"team":   []model.ApiTeamParam{playerTeam, botTeam},
+			},
+			"dg": "",
+			"dc": "",
+		})
+
+	case actLower == "send_ready_pokemon_select" || strings.Contains(actLower, "pokemonselect") || strings.Contains(actLower, "pokemon_select"):
+		sendJSON(rw, map[string]interface{}{
+			"action": "res_ready_pokemon_select",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
+		})
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_pokemon_select_start",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
+			"dp": map[string]interface{}{
 				"pssAt": now,
 			},
-		}
-		sendJSON(rw, resp)
+		})
 
-	case strings.Contains(strings.ToLower(action), "startbattle"):
-		resp := map[string]interface{}{
-			"action": action,
+	case actLower == "send_start_battle" || actLower == "send_start_battle_timeout" || strings.Contains(actLower, "startbattle") || strings.Contains(actLower, "start_battle"):
+		sendJSON(rw, map[string]interface{}{
+			"action": "res_start_battle",
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt),
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
+		})
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_start_battle",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
 			"dp": map[string]interface{}{
-				"rmid":   rmid,
-				"tse":    "bot_turn_seed_001",
+				"fri": st.Profile.Fri,
+			},
+		})
+		sendJSON(rw, map[string]interface{}{
+			"action": "send_battle_start",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
+			"dp": map[string]interface{}{
+				"tse":    []int{0, 1, 2, 3},
 				"tseasn": 1,
 			},
-		}
-		sendJSON(rw, resp)
+		})
 
-	case strings.Contains(strings.ToLower(action), "command"):
-		dp, _ := msg["dp"].(map[string]interface{})
-		bl := ""
-		if dp != nil {
-			bl, _ = dp["bl"].(string)
+	case actLower == "command" || strings.Contains(actLower, "command"):
+		sub, _ := msg["sub"].(string)
+		if sub == "" {
+			sub = "command"
 		}
+		dp, _ := msg["dp"].(map[string]interface{})
+		if dp == nil {
+			if dcStr, ok := msg["dc"].(string); ok && dcStr != "" {
+				if dec, err := crypto.DecryptWSCommand(dcStr, st.SessionID, "atk_bot_match_001", dmy); err == nil {
+					_ = json.Unmarshal([]byte(dec), &dp)
+				}
+			}
+		}
+
+		inBl := ""
+		if dp != nil {
+			inBl, _ = dp["bl"].(string)
+		}
+
+		outBl, endType := h.buildBattleTurnResponse(inBl, sess)
+		sess.asn++
+
 		resp := map[string]interface{}{
-			"action": action,
+			"action": "res_command",
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt),
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
+			"sub":    sub,
+			"cry":    0,
+			"hsh":    "",
+			"dc":     "",
 			"dp": map[string]interface{}{
 				"tobtim": 900,
 				"comtim": 45,
-				"btltim": 1200,
-				"bl":     bl,
-				"updAt":  now,
-				"asn":    1,
+				"btltim": map[string]interface{}{
+					"sc":     map[string]int{"0": 1, "1": 1},
+					"btlst":  now,
+					"us":     []map[string]interface{}{{"p": now, "f": 0, "s": 0}, {"p": now, "f": 0, "s": 0}},
+					"effst":  now,
+					"effmax": 60,
+					"keffst": 0,
+					"kast":   0,
+					"cmdst":  now,
+				},
+				"bl":    outBl,
+				"et":    endType,
+				"lfri":  []string{},
+				"updAt": now,
+				"asn":   sess.asn,
 			},
 		}
 		sendJSON(rw, resp)
 
+	case actLower == "keepalive":
+		sendJSON(rw, map[string]interface{}{
+			"action": "keepalive",
+			"code":   0,
+			"lcode":  0,
+			"cnt":    cntStr,
+			"spt":    now,
+			"stime":  now,
+			"dmy":    dmy,
+		})
+
 	default:
-		// KeepAlive or generic ack
-		resp := map[string]interface{}{
+		sendJSON(rw, map[string]interface{}{
 			"action": action,
 			"code":   0,
 			"lcode":  0,
-			"cnt":    int(cnt),
+			"cnt":    cntStr,
+			"spt":    now,
 			"stime":  now,
+			"dmy":    dmy,
 			"dp": map[string]interface{}{
 				"rmid": rmid,
 			},
-		}
-		sendJSON(rw, resp)
+		})
 	}
+}
+
+// buildBattleTurnResponse constructs a valid WebSocket.Message.Receive.BattleCommandResponse JSON string ("Sequences")
+// matching PKB.Battle.BattleSequencePlayer & BattleSequenceUtil (Types 13370, 13371, 13375).
+func (h *Handler) buildBattleTurnResponse(inBl string, sess *sessionState) (string, int) {
+	// Parse incoming BattleCommand if provided
+	moveID := int16(89) // Default: Earthquake
+	if inBl != "" {
+		var cmdMap map[string]interface{}
+		if err := json.Unmarshal([]byte(inBl), &cmdMap); err == nil {
+			if m, ok := cmdMap["Move"].(float64); ok && m > 0 {
+				moveID = int16(m)
+			}
+		}
+	}
+
+	nextNo := func() uint16 {
+		sess.seqNo++
+		return sess.seqNo
+	}
+
+	p0 := packUnit(0, 0, 0, 0)
+	p1 := packUnit(1, 0, 1, 0)
+
+	// First command in battle: send CtrlEntry (2) for both sides + SyncStartTurn (49) + SyncEndCmd (59) + CtrlWait (1)
+	if !sess.hasEntry {
+		sess.hasEntry = true
+		seqs := []map[string]interface{}{
+			{"Cmd": 2, "SU": p0, "TU": p0, "No": nextNo()},  // CtrlEntry Player
+			{"Cmd": 2, "SU": p1, "TU": p1, "No": nextNo()},  // CtrlEntry Bot
+			{"Cmd": 49, "P1": 1, "No": nextNo()},            // SyncStartTurn
+			{"Cmd": 59, "No": nextNo()},                     // SyncEndCmd
+			{"Cmd": 1, "No": nextNo()},                      // CtrlWait
+		}
+		b, _ := json.Marshal(map[string]interface{}{"Sequences": seqs})
+		return string(b), 0
+	}
+
+	// Subsequent turn command: execute player move, KO bot Pokemon, and trigger CtrlBattleEnd (3)
+	seqs := []map[string]interface{}{
+		{"Cmd": 52, "SU": p0, "TU": p1, "No": nextNo()},                               // SyncExeActBegin
+		{"Cmd": 14, "SU": p0, "TU": p1, "EKind": 1, "EMdId": moveID, "No": nextNo()},  // CtrlActMoveSuccess
+		{"Cmd": 38, "SU": p0, "TU": p1, "P1": 250, "No": nextNo()},                    // CtrlHPDamage
+		{"Cmd": 4, "SU": p1, "TU": p1, "No": nextNo()},                                // CtrlPokeFainting
+		{"Cmd": 55, "SU": p0, "TU": p1, "No": nextNo()},                               // SyncExeActEnd
+		{"Cmd": 58, "P1": 1, "No": nextNo()},                                          // SyncEndTurn
+		{"Cmd": 3, "P1": 1, "RU": 0, "No": nextNo()},                                  // CtrlBattleEnd (Player Win)
+		{"Cmd": 59, "No": nextNo()},                                                   // SyncEndCmd
+		{"Cmd": 1, "No": nextNo()},                                                    // CtrlWait
+	}
+	b, _ := json.Marshal(map[string]interface{}{"Sequences": seqs})
+	return string(b), 1
 }
 
 func sendJSON(rw *bufio.ReadWriter, v interface{}) {

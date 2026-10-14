@@ -22,6 +22,7 @@ data/
 
 # Certificados, chaves privadas e builds de APK
 certs/
+apk/
 build_apk/
 *.apk
 *.apkm
