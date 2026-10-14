@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -34,6 +36,7 @@ var (
 	mdDefaultLSize int
 	mdDefaultLChs  string
 	mdDefaultLJhs  string
+	cfTunnelRegex  = regexp.MustCompile(`https://[a-zA-Z0-9-]+\.trycloudflare\.com`)
 )
 
 var mdAllTableNames = []string{
@@ -341,9 +344,22 @@ func initMdCache() {
 	})
 }
 
+func resolveMdBaseURL(s *Server, r *http.Request) string {
+	if envURL := strings.TrimSpace(os.Getenv("POKECHAMP_MD_URL")); envURL != "" {
+		return strings.TrimRight(envURL, "/")
+	}
+	if data, err := os.ReadFile("/tmp/pokechamp-tunnel.log"); err == nil && len(data) > 0 {
+		matches := cfTunnelRegex.FindAllString(string(data), -1)
+		if len(matches) > 0 {
+			return strings.TrimRight(matches[len(matches)-1], "/")
+		}
+	}
+	return strings.TrimRight(s.resolvePublicURL(r), "/")
+}
+
 func (s *Server) buildMdListMeta(r *http.Request) *model.MdListMeta {
 	initMdCache()
-	dom := strings.TrimRight(s.resolvePublicURL(r), "/") + "/md/"
+	dom := resolveMdBaseURL(s, r) + "/md/"
 	return &model.MdListMeta{
 		Ver:  mdListVer,
 		Tim:  mdListTim,
