@@ -25,7 +25,7 @@ KEYSTORE="/home/nicokaka/Documents/projects/tcg-makemoney/MODDED_APK/debug.keyst
 
 mkdir -p "$DIR/build_apk"
 
-if [ ! -f "$DIR/build_apk/base.patched.apk" ] || [ ! -f "$DIR/build_apk/split_config.arm64_v8a.patched.apk" ]; then
+if [ ! -f "$DIR/build_apk/base.patched.apk" ] || [ ! -f "$DIR/build_apk/split_config.arm64_v8a.patched.apk" ] || [ "$DIR/scripts/gerar_apk_modificado.py" -nt "$DIR/build_apk/base.patched.apk" ]; then
     echo "[2/4] Gerando APKs modificados para o servidor Oracle Cloud (https://164.152.40.114:7443)..."
     python3 "$DIR/scripts/gerar_apk_modificado.py"
 fi
@@ -56,10 +56,13 @@ sign_one "$DIR/build_apk/split_config.arm64_v8a.patched.apk" "split_config.arm64
 sign_one "$DIR/apk/extracted/split_UnityDataAssetPack.apk" "split_UnityDataAssetPack.apk"
 
 echo "[4/4] Instalando Pokémon Champions no celular ($MODEL)..."
-adb -s "$SERIAL" install-multiple -r \
+adb -s "$SERIAL" install-multiple -r -i com.android.vending --user 0 --no-incremental \
     "$DIR/build_apk/signed_base.apk" \
     "$DIR/build_apk/signed_split_config.arm64_v8a.apk" \
     "$DIR/build_apk/signed_split_UnityDataAssetPack.apk"
+
+echo "[*] Iniciando Pokémon Champions no aparelho..."
+adb -s "$SERIAL" shell am start --user 0 -n jp.pokemon.pokemonchampions/com.unity3d.player.UnityPlayerActivity >/dev/null 2>&1 || true
 
 echo ""
 echo "========================================================================="

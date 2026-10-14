@@ -9,14 +9,35 @@ Patcher Automatizado do APK Pokémon Champions (v1.2.2 Build 3859)
 - Aplica patch opcional em libil2cpp.so (0x451d1e0 e 0x451d23c) para envio de JSON puro em pmc
 """
 import argparse
+import hashlib
 import shutil
 import struct
 import zipfile
+import zlib
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_EXTRACTED_DIR = ROOT_DIR / "apk" / "extracted"
 OUT_DIR = ROOT_DIR / "build_apk"
+
+
+def patch_classes_dex(dex_bytes: bytes) -> bytes:
+    buf = bytearray(dex_bytes)
+    # Bypass Google Play Pairip LicenseClient in classes.dex:
+    # 1. 0x445394: LicenseClient.checkLicense(Context)V -> return-void (0e 00)
+    # 2. 0x445704: LicenseClient.initializeLicenseCheck()V -> return-void (0e 00)
+    # 3. 0x444f1c: LicenseClient.isLocalCheckPassed()Z -> const/4 v0, 1; return v0 (12 10 0f 00)
+    buf[0x445394:0x445396] = b"\x0e\x00"
+    buf[0x445704:0x445706] = b"\x0e\x00"
+    buf[0x444F1C:0x444F20] = b"\x12\x10\x0f\x00"
+
+    # Recompute DEX SHA-1 signature (bytes 12..32 over bytes 32..EOF)
+    buf[12:32] = hashlib.sha1(buf[32:]).digest()
+    # Recompute DEX Adler32 checksum (bytes 8..12 over bytes 12..EOF)
+    checksum = zlib.adler32(buf[12:]) & 0xFFFFFFFF
+    struct.pack_into("<I", buf, 8, checksum)
+    print(f"  [OK] classes.dex: Bypass LicenseClient aplicado (Adler32=0x{checksum:08x})")
+    return bytes(buf)
 
 
 def patch_global_metadata(md_bytes: bytes, target_url: str) -> bytes:
@@ -95,19 +116,24 @@ def main():
         raise FileNotFoundError(f"base.apk não encontrado em {base_apk}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"[1/3] Aplicando patch em global-metadata.dat para URL: {args.url}")
+    print(f"[1/3] Aplicando patch em global-metadata.dat e classes.dex para URL: {args.url}")
     with zipfile.ZipFile(base_apk, "r") as z:
         orig_md = z.read("assets/bin/Data/Managed/Metadata/global-metadata.dat")
+        orig_dex = z.read("classes.dex")
 
     patched_md = patch_global_metadata(orig_md, args.url)
+    patched_dex = patch_classes_dex(orig_dex)
     (OUT_DIR / "global-metadata.patched.dat").write_bytes(patched_md)
 
     out_base = OUT_DIR / "base.patched.apk"
-    print(f"[2/3] Gerando {out_base.name} com global-metadata.dat modificado...")
+    print(f"[2/3] Gerando {out_base.name} com global-metadata.dat e classes.dex modificados...")
     replace_in_zip(
         base_apk,
         out_base,
-        {"assets/bin/Data/Managed/Metadata/global-metadata.dat": patched_md},
+        {
+            "assets/bin/Data/Managed/Metadata/global-metadata.dat": patched_md,
+            "classes.dex": patched_dex,
+        },
     )
 
     if not args.skip_so_patch and arm64_apk.exists():
