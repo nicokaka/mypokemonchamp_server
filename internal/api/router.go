@@ -150,8 +150,6 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-PKB-S-TIME", sTimeStr)
 	w.Header().Set("X-PKB-DMY-VAL", dmy)
-	w.Header()["X-PKB-S-TIME"] = []string{sTimeStr}
-	w.Header()["X-PKB-DMY-VAL"] = []string{dmy}
 
 	tmv := uint32(1)
 	ppv := uint32(1)
@@ -181,7 +179,6 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 			}
 			if enc != "" {
 				w.Header().Set("X-PKB-ENCRYPT", "1")
-				w.Header()["X-PKB-ENCRYPT"] = []string{"1"}
 				resp.Pmc = enc
 			}
 		}
