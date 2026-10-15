@@ -61,10 +61,20 @@ A descompilação de `Net.ApiTemplate<TReq, TReqPmp, TRes, TResPmp>::ParseRespon
 2. Se `len(uuid) != 42`, o cliente rejeita a resposta com erro `0x493eb` (`299995`).
 3. Em [`internal/store/store.go`](internal/store/store.go), `normalizeUUID42` garante que `s.state.UUID` e `s.state.Profile.Id` tenham sempre 42 caracteres (`"champ0001nicolas0001pokemonchampions000001"` por padrão, ou o UUID de 42 caracteres enviado pelo próprio cliente).
 
-### 2.5. Campos Omitidos no Topo do `ApiResponseEnvelope` (`ApiBase::CheckResponseBodyBase` — `VA 0x451d9d8`)
-Em `writeGameResponse` ([`internal/api/router.go`](internal/api/router.go)):
-- `Asset` e `Md` no envelope externo devem permanecer `nil` (omitidos) para que `CheckResponseBodyBase` (`0x451d9d8`) **não sobrescreva** os domínios oficiais da CDN da Nintendo/ILCA para download de AssetBundles e MasterData.
-- `Sid` no envelope externo deve permanecer vazio (o `sid` real vai dentro de `AuthLoginPmp` em `pmp`/`pmc`), evitando que `CheckResponseBodyBase` invoque `DecryptResponseSessionIdApi` (`VA 0x4539f40`) em cada resposta.
+### 2.5. Arquitetura de Master Data (`/md/c/...`) e AssetBundles Offline (`split_UnityDataAssetPack.apk`)
+1. **100% dos 2.647 AssetBundles (`1,14 GB`) são Built-in no APK:**
+   - O catálogo `assets/AssetAssistant/syn.bin` dentro de `split_UnityDataAssetPack.apk` contém 2.603 registros (`_records`), todos marcados com `"isBuiltin": true` (`0` pacotes remotos).
+   - O passo *"Downloading game data"* na tela de título baixa exclusivamente as **89 tabelas JSON criptografadas de Master Data (`Net.Md*Param`)** servidas por [`internal/api/md.go`](internal/api/md.go) em `GET /md/c/{sha1_hash}`.
+2. **Proibição de Tabelas Vazias (`"[]"`) por causa de `ReadMDParam::GetTargetData<T>` (`VA 0x2cd0368`):**
+   - Quase todos os getters de `ReadMDParam` (`0x23c8418..0x23d1adc`) delegam para `GetTargetData<T>(T[] list, Predicate<T> match)` (`0x2cd0368`), que faz `return list[0];` (`0x2cd03f0`) caso o ID buscado não seja encontrado, e lança `IndexOutOfRangeException` (`0x2cd0414`) se `list.Length == 0` (`"[]"`).
+   - O gerador [`scripts/generate_master_data.py`](scripts/generate_master_data.py) extrai diretamente dos AssetBundles do APK (`uisprites/personal/s`, `uisprites/avatarcostume/males`, `trainer/avatar/partsdata`, `uisprites/item/s`, etc.) todas as **89 tabelas JSON (`5.033` registros)** em `game-data/master-data/*.json`, garantindo que **nenhuma** tabela seja `"[]"`.
+3. **Validação de Avatar (`PlayerAvatar::ValidateParts` — `VA 0x24c0bd8`) e Tutorial (`TuPrg = 1200`):**
+   - Logo após baixar a 89ª tabela (`junior_ignore_resource`), `TitleScene::StartLoadAssetsState` (`VA 0x23b38e8`) chama `PlayerAvatar::Create` (`VA 0x24bf804`) $\rightarrow$ `PlayerAvatar::ValidateParts` (`VA 0x24c0bd8`).
+   - Os IDs válidos do Avatar masculino padrão (`id=1` em `AvatarHelper::CreateInitialAvatarParam`, `VA 0x24bda18`) configurados em [`internal/store/store.go`](internal/store/store.go) (`currentSchemaVer = 3`) são:
+     - `Cos`: `{"p0": 1, "p0c": 1, "p1": 1001, "p2": 0, "p3": 5001, "p4": 7001, "p5": 9001, "p6": 11001, "p7": 13001, "p8": 15001, "p9": 0, "pa": 0, "pb": 0}`
+     - `Fac`: `{"p0": 25001, "p0c": 5, "p1": 23022, "p2": 27001, "p2c": 5, "p3": 29001, "p4": 31003, "p5": 0, "p6": 0, "p7": 37001, "p7c": 32, "p8c": 1, "p8l": 42}`
+     - `Mot`: `{"p0": 1001, "p1": 3001, "p2": 5001}`
+   - O checkpoint final de tutorial em `EventScriptCheckPoint` (bundle `eventscript`) é **`TuPrg = 1200`** e `SubEventManager::IsAllBattleTutorial` (`VA 0x26289ac`) verifica as flags **`400..413`** em `TuFlgs`. Com ambos preenchidos, `TitleScene::StartValidateIntroductionState` (`VA 0x23b4958`) navega direto para a **`HomeScene`**.
 
 ---
 

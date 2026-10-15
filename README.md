@@ -31,16 +31,20 @@ Servidor 100% privado, emulador de backend, painel web **MyPokeChamp Studio** e 
 ```text
 mypokechamp_server/
 ├── cmd/server/main.go                  # Entrypoint Smart Multiplexer (:7443) + HTTP/Admin (:9080)
+├── game-data/master-data/*.json        # 89 tabelas reais de Master Data (5.033 registros extraídos do APK)
 ├── internal/
 │   ├── api/router.go                   # Rotas /auth/*, /api/*, /health e API REST /api/admin/*
+│   ├── api/md.go                       # Servidor criptografado de Master Data (/md/c/{sha1_hash})
 │   ├── api/admin_ui.go                 # Interface Web MyPokeChamp Studio (/admin)
 │   ├── api/router_test.go              # Testes automatizados de criptografia, boot, batalha e admin
+│   ├── api/md_test.go                  # Teste ponta a ponta das 89 tabelas de Master Data
 │   ├── crypto/crypto.go                # AES-256-CBC + GZip + derivação MD5 (Auth, API & WebSocket2)
 │   ├── localtls/localtls.go            # Certificados TLS SNI dinâmicos
 │   ├── model/dto.go                    # Structs canônicos extraídos do Net.dll
 │   ├── store/store.go                  # Estado persistente JSON (Box, Times, VP, Ranking, Bots)
 │   └── ws/battle_ws.go                 # Handler WebSocket2 para Matchmaking e Batalhas vs Bots
 ├── scripts/
+│   ├── generate_master_data.py         # Extrator das 89 tabelas Master Data dos AssetBundles do APK
 │   ├── deploy_champ_oracle.py          # Deploy automatizado via SSH/SCP para Oracle Cloud
 │   └── gerar_apk_modificado.py         # Patcher de classes.dex, global-metadata.dat, libunity.so e libil2cpp.so
 ├── DEPLOY_SERVIDOR/

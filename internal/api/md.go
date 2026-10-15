@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ import (
 const (
 	mdAlphabet = "abcdefghijklmnopqrstuvwxyz0123456789_"
 	mdListVer  = 1
-	mdListTim  = 1710000018
+	mdListTim  = 1710000020
 	mdListRa   = "pkb2026md"
 	mdListCry  = 1
 )
@@ -225,6 +226,21 @@ func encryptMdPayload(jsonStr, key, iv string) ([]byte, error) {
 }
 
 func buildMdTableJSON(tableName string) string {
+	searchDirs := []string{
+		"game-data/master-data",
+		"/opt/pokechamp-server/game-data/master-data",
+		"../../game-data/master-data",
+	}
+	if customDir := strings.TrimSpace(os.Getenv("POKECHAMP_MD_DIR")); customDir != "" {
+		searchDirs = append([]string{customDir}, searchDirs...)
+	}
+	for _, dir := range searchDirs {
+		fp := filepath.Join(dir, tableName+".json")
+		if raw, err := os.ReadFile(fp); err == nil && len(raw) > 0 {
+			return strings.TrimSpace(string(raw))
+		}
+	}
+
 	switch tableName {
 	case "country_codes":
 		rows := []map[string]interface{}{

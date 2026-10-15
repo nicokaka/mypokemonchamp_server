@@ -42,8 +42,8 @@ func TestMasterDataEndToEnd(t *testing.T) {
 	// Simulate Android client (platformCode = 3)
 	platformCode := 3
 	listFn, listKey, listIV := deriveMdMetaListInfo(platformCode, mdListMeta.Ver, mdListMeta.Tim, mdListMeta.Ra)
-	if listFn != "eec18ea04378b5c189d3c9050aa8a01e08cb60d3" {
-		t.Fatalf("expected Android listFn eec18ea04378b5c189d3c9050aa8a01e08cb60d3, got %s", listFn)
+	if listFn != "ca9994c6c239a07344b9e43791f895a5b5e97a34" {
+		t.Fatalf("expected Android listFn ca9994c6c239a07344b9e43791f895a5b5e97a34, got %s", listFn)
 	}
 
 	// 2. Fetch /md/c/{listFn}
@@ -116,6 +116,13 @@ func TestMasterDataEndToEnd(t *testing.T) {
 		}
 		if crypto.MD5Hex(string(tPlain)) != m.Jhs {
 			t.Fatalf("table %s jhs mismatch", m.Name)
+		}
+		var rows []map[string]interface{}
+		if err := json.Unmarshal(tPlain, &rows); err != nil {
+			t.Fatalf("table %s invalid JSON array: %v", m.Name, err)
+		}
+		if len(rows) == 0 {
+			t.Fatalf("table %s is empty ([])!", m.Name)
 		}
 	}
 }

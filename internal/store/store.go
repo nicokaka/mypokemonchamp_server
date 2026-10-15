@@ -39,7 +39,7 @@ type PlayerState struct {
 }
 
 const (
-	currentSchemaVer = 2
+	currentSchemaVer = 3
 	defaultUUID42    = "champ0001nicolas0001pokemonchampions000001"
 )
 
@@ -150,8 +150,11 @@ func (s *Store) BuildFullUD() *model.ApiUdParam {
 	}
 	main := s.state.Main
 	main.Pcnt = len(s.state.Pokemons)
-	if main.TuFlgs == nil {
-		main.TuFlgs = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if main.TuPrg < 1200 {
+		main.TuPrg = 1200
+	}
+	if len(main.TuFlgs) < 20 {
+		main.TuFlgs = []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413}
 	}
 	if main.Putoi == nil {
 		main.Putoi = map[string]map[string]int{}
@@ -985,9 +988,9 @@ func defaultPlayerState() PlayerState {
 		},
 		Main: model.ApiUserMainParam{
 			Vp:     999999, // Unlimited VP for free training & customization
-			TuPrg:  999,    // Tutorial completed
-			TuFlgs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-			Pbsiz:  300,    // 300 Box capacity
+			TuPrg:  1200,   // Tutorial completed (EventScriptCheckPoint max = 1200)
+			TuFlgs: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413},
+			Pbsiz:  300, // 300 Box capacity
 			Pbexc:  10,
 			Pcnt:   len(pokes),
 			Ssnno:  1,
@@ -1008,9 +1011,9 @@ func defaultPlayerState() PlayerState {
 			Swpai:  map[string]interface{}{"pmids": []string{}, "addbs": 300},
 		},
 		Avatar: model.ApiUserAvatarParam{
-			Fac: map[string]int{"p0": 1, "p0c": 1, "p1": 1, "p2": 1, "p2c": 1, "p3": 1, "p4": 1, "p5": 1, "p6": 1, "p7": 1, "p7c": 1, "p8c": 1, "p8l": 1},
-			Cos: map[string]int{"p0": 1, "p0c": 1, "p1": 1, "p2": 1, "p3": 1, "p4": 1, "p5": 1, "p6": 1, "p7": 1, "p8": 1, "p9": 1, "pa": 1, "pb": 1},
-			Mot: map[string]int{"p0": 1, "p1": 1, "p2": 1},
+			Fac: map[string]int{"p0": 25001, "p0c": 5, "p1": 23022, "p2": 27001, "p2c": 5, "p3": 29001, "p4": 31003, "p5": 0, "p6": 0, "p7": 37001, "p7c": 32, "p8c": 1, "p8l": 42},
+			Cos: map[string]int{"p0": 1, "p0c": 1, "p1": 1001, "p2": 0, "p3": 5001, "p4": 7001, "p5": 9001, "p6": 11001, "p7": 13001, "p8": 15001, "p9": 0, "pa": 0, "pb": 0},
+			Mot: map[string]int{"p0": 1001, "p1": 3001, "p2": 5001},
 		},
 		Pokemons:  pokes,
 		Teams:     teams,
