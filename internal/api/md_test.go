@@ -42,6 +42,9 @@ func TestMasterDataEndToEnd(t *testing.T) {
 	// Simulate Android client (platformCode = 3)
 	platformCode := 3
 	listFn, listKey, listIV := deriveMdMetaListInfo(platformCode, mdListMeta.Ver, mdListMeta.Tim, mdListMeta.Ra)
+	if listFn != "eec18ea04378b5c189d3c9050aa8a01e08cb60d3" {
+		t.Fatalf("expected Android listFn eec18ea04378b5c189d3c9050aa8a01e08cb60d3, got %s", listFn)
+	}
 
 	// 2. Fetch /md/c/{listFn}
 	mdReq := httptest.NewRequest(http.MethodGet, "/md/c/"+listFn, nil)
@@ -52,8 +55,8 @@ func TestMasterDataEndToEnd(t *testing.T) {
 	}
 
 	rawListBytes := mdRec.Body.Bytes()
-	if sha256HexBytes(rawListBytes) != mdListMeta.Lchs {
-		t.Fatalf("Lchs mismatch: got %s, want %s", sha256HexBytes(rawListBytes), mdListMeta.Lchs)
+	if md5HexBytes(rawListBytes) != mdListMeta.Lchs {
+		t.Fatalf("Lchs mismatch: got %s, want %s", md5HexBytes(rawListBytes), mdListMeta.Lchs)
 	}
 	if len(rawListBytes) != mdListMeta.Lsiz {
 		t.Fatalf("Lsiz mismatch: got %d, want %d", len(rawListBytes), mdListMeta.Lsiz)
@@ -100,7 +103,7 @@ func TestMasterDataEndToEnd(t *testing.T) {
 			t.Fatalf("table %s GET /md/c/%s returned %d", m.Name, fn, tRec.Code)
 		}
 		tBytes := tRec.Body.Bytes()
-		if sha256HexBytes(tBytes) != m.Chs {
+		if md5HexBytes(tBytes) != m.Chs {
 			t.Fatalf("table %s chs mismatch", m.Name)
 		}
 		tCipher, err := base64.StdEncoding.DecodeString(string(tBytes))

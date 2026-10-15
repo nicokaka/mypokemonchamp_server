@@ -154,7 +154,7 @@ func (s *Server) writeGameResponse(w http.ResponseWriter, r *http.Request, pmp i
 	tmv := uint32(1)
 	ppv := uint32(1)
 	wvv := uint32(1)
-	sexp := 86400
+	sexp := int(nowUnix + 86400)
 
 	resp := model.ApiResponseEnvelope{
 		Code: 0,
@@ -255,7 +255,7 @@ func (s *Server) handleGameRequest(w http.ResponseWriter, r *http.Request) {
 		zero := 0
 		s.writeGameResponse(w, r, model.AuthLoginPmp{
 			Sid:      st.SessionID,
-			Sexp:     86400,
+			Sexp:     int(now + 86400),
 			Refnotif: []interface{}{},
 			Tmoff:    model.LoginTimeOffset{Offset: 0, Isfix: 0},
 			Phtrbx:   &zero,

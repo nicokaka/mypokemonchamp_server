@@ -35,7 +35,7 @@ type ApiResponseEnvelope struct {
 	PpV     *uint32              `json:"ppV,omitempty"`
 	PpU     string               `json:"ppU,omitempty"`
 	WvV     *uint32              `json:"wvV,omitempty"`
-	WvU     string               `json:"wvU,omitempty"`
+	WvU     interface{}          `json:"wvU,omitempty"`
 	Sid     string               `json:"sid,omitempty"`
 	Sexp    *int                 `json:"sexp,omitempty"`
 	RqUrl   string               `json:"rqUrl,omitempty"`

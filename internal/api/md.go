@@ -131,13 +131,12 @@ var mdAllTableNames = []string{
 	"junior_ignore_resource",
 }
 
-func sha256HexString(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
+func md5HexBytes(b []byte) string {
+	return crypto.MD5Hex(string(b))
 }
 
-func sha256HexBytes(b []byte) string {
-	sum := sha256.Sum256(b)
+func sha256HexString(s string) string {
+	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -186,8 +185,9 @@ func decryptMdMetaListName(nse string, tim int) string {
 }
 
 // deriveMdMetaListInfo replicates Net.MdHandler::GetMdMetaListInfo (VA 0x453f32c).
+// Note: 0x453aa30 is EncryptUtils::SHA1 (40 hex chars).
 func deriveMdMetaListInfo(platformCode, ver, tim int, ra string) (fileName, key, iv string) {
-	fileName = sha256HexString(fmt.Sprintf("%d%dc%d%s", platformCode, ver, tim, ra))
+	fileName = crypto.SHA1Hex(fmt.Sprintf("%d%dc%d%s", platformCode, ver, tim, ra))
 	key = crypto.MD5Hex(fmt.Sprintf("%d%da%d%s", platformCode, ver, tim, ra))
 	ivFull := crypto.MD5Hex(fmt.Sprintf("%d%db%d%s", platformCode, ver, tim, ra))
 	iv = ivFull[:16]
@@ -195,6 +195,7 @@ func deriveMdMetaListInfo(platformCode, ver, tim int, ra string) (fileName, key,
 }
 
 // deriveMdMetaInfo replicates Net.MdHandler::GetMdMetaInfo (VA 0x453f96c).
+// Note: 0x453fd58 calls 0x453aa30 (EncryptUtils::SHA1, 40 hex chars).
 func deriveMdMetaInfo(platformCode int, name string, ver, tim int, ra string) (fileName, key, iv string) {
 	timMd5 := crypto.MD5Hex(fmt.Sprintf("%d", tim))
 	s1 := timMd5[0:10]
@@ -205,7 +206,7 @@ func deriveMdMetaInfo(platformCode int, name string, ver, tim int, ra string) (f
 	h2 := crypto.MD5Hex(fmt.Sprintf("%s#%d#%s%d%s", name, ver, s2, platformCode, ra))
 	h3 := crypto.MD5Hex(fmt.Sprintf("%s=%s=%d%d%s", s3, name, ver, platformCode, ra))
 
-	fileName = sha256HexString(fmt.Sprintf("%s%s%s%d", h3[0:10], h2[10:20], h1[20:30], ver))
+	fileName = crypto.SHA1Hex(fmt.Sprintf("%s%s%s%d", h3[0:10], h2[10:20], h1[20:30], ver))
 	key = crypto.MD5Hex(fmt.Sprintf("%s@%s", name, h1))
 	ivFull := crypto.MD5Hex(fmt.Sprintf("%s!%s", name, h2))
 	iv = ivFull[:16]
@@ -298,7 +299,7 @@ func initMdCache() {
 					log.Printf("[MD] erro ao criptografar tabela %s (plat=%d): %v", name, platformCode, err)
 					continue
 				}
-				chs := sha256HexBytes(encBytes)
+				chs := md5HexBytes(encBytes)
 				jhs := crypto.MD5Hex(tableJSON)
 				nse := encryptMdMetaListName(name, mdListTim)
 
@@ -329,15 +330,17 @@ func initMdCache() {
 				continue
 			}
 
-			mdFilesByHash[listFn] = mdCachedEntry{
+			entry := mdCachedEntry{
 				Desc: fmt.Sprintf("MdMetaList (plat=%d, tables=%d)", platformCode, len(metaEntries)),
 				Data: listEncBytes,
 			}
+			mdFilesByHash[listFn] = entry
+			mdFilesByHash[sha256HexString(fmt.Sprintf("%d%dc%d%s", platformCode, mdListVer, mdListTim, mdListRa))] = entry
 
 			// PlatformCode 3 is Android (RuntimePlatform.Android == 11 -> 3).
 			if platformCode == 3 {
 				mdDefaultLSize = len(listEncBytes)
-				mdDefaultLChs = sha256HexBytes(listEncBytes)
+				mdDefaultLChs = md5HexBytes(listEncBytes)
 				mdDefaultLJhs = crypto.MD5Hex(metaListJSON)
 			}
 		}
