@@ -62,9 +62,8 @@ func (l *chanListener) Addr() net.Addr {
 }
 
 func isPTCGPTraffic(buf []byte) bool {
-	return bytes.Contains(buf, []byte("app-41283.com")) ||
-		bytes.Contains(buf, []byte("nintendo.com")) ||
-		bytes.Contains(buf, []byte("pokemontcgp"))
+	// Any TLS traffic that is not specifically for Pokemon Champions belongs to PTCGP
+	return !bytes.Contains(buf, []byte("pokemonchampions"))
 }
 
 func proxyTCP(client net.Conn, initial []byte, targetAddr string) {
